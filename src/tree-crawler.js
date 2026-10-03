@@ -137,6 +137,30 @@ function trafficSignature(requests) {
   };
 }
 
+function semanticControlKey(control) {
+  return [
+    control?.kind ?? '',
+    control?.name ?? '',
+    control?.event ?? '',
+    control?.purchaseIndex ?? '',
+    control?.optionIndex ?? '',
+    control?.type ?? '',
+    control?.method ?? ''
+  ].map(String).join('|');
+}
+
+function dedupeControlsForExploration(controls, snapshot = null) {
+  const chosen = new Map();
+  for (const control of controls) {
+    const key = semanticControlKey(control);
+    const previous = chosen.get(key);
+    if (!previous || (control?.active === true && previous?.active !== true)) {
+      chosen.set(key, control);
+    }
+  }
+  return sortControls([...chosen.values()], snapshot);
+}
+
 function controlIdentity(control) {
   return [
     control?.kind ?? '',
@@ -370,7 +394,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
 
     if (queued.depth >= maxDepth) continue;
 
-    const candidates = controls.slice(0, maxControls);
+    const candidates = dedupeControlsForExploration(controls, snapshot).slice(0, maxControls);
 
     for (let ci = 0; ci < candidates.length && tree.edges.length < maxEdges; ci++) {
       const control = replayDescriptor(candidates[ci]);
@@ -453,7 +477,10 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
       console.log(
         '    tree edge=' + edge.id +
         ' control=' + (control.name ?? control.kind ?? '?') +
+        ' kind=' + (control.kind ?? '-') +
+        ' method=' + (control.method ?? '-') +
         ' ok=' + Boolean(press?.ok) +
+        ' pending=' + (press?.pendingPurchaseIndex ?? childSnapshot?.featurePurchaseIndex ?? '-') +
         ' req=' + traffic.requestCount +
         ' signals=' + (traffic.signals.join(',') || '-') +
         ' child=' + (childSignature || 'terminal')
