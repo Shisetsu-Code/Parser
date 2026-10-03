@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/sweet-tree.yml"
+      - "src/**"
 
 jobs:
   test:
@@ -27,4 +28,4 @@ jobs:
         if: always()
         shell: bash
         run: |
-          grep -R -E '"name": "O_[01]"|"name": "ConfirmBuy"|"name": "StartSpin_Button"|pur=|purchased_feature' results || true
+          grep -R -E '"name": "O_[01]"|"name": "ConfirmBuy"|"name": "StartSpin_Button"|PurchaseFeature|pendingPurchaseIndex|featurePurchaseIndex|pur=|purchased_feature' results || true
