@@ -1,7 +1,9 @@
 import path from 'node:path';
+import readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
 import { chromium } from 'playwright';
 import { findRuntime } from './providers/index.js';
-import { safeName, sleep, summarizeRequest, writeJson } from './lib/common.js';
+import { ensureDir, safeName, sleep, summarizeRequest, writeJson } from './lib/common.js';
 
 const DEMO_HOSTS = [
   /(^|\.)3oaks\.com$/i,
@@ -78,6 +80,19 @@ function hasGameplayRequest(requests) {
   });
 }
 
+async function pauseForInspection(message) {
+  if (!input.isTTY) {
+    console.log('    stdin is not interactive; skipping Enter pause');
+    return;
+  }
+  const rl = readline.createInterface({ input, output });
+  try {
+    await rl.question(message);
+  } finally {
+    rl.close();
+  }
+}
+
 async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, options) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
@@ -95,6 +110,7 @@ async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, 
     press: null,
     spinFallback: null,
     network: [],
+    screenshot: null,
     error: null
   };
 
@@ -124,6 +140,23 @@ async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, 
     }
 
     result.network = delta;
+
+    const shotDir = path.join('results', 'screenshots');
+    await ensureDir(shotDir);
+    const shotName = `${safeName(url)}-buy-${purchaseOption.ordinal ?? purchaseOption.index}.png`;
+    const shotPath = path.join(shotDir, shotName);
+    await page.screenshot({ path: shotPath, fullPage: true });
+    result.screenshot = shotPath;
+    console.log(`    screenshot=${shotPath}`);
+
+    if (options.holdAfterPurchaseMs > 0) {
+      console.log(`    holding purchase window for ${options.holdAfterPurchaseMs} ms...`);
+      await page.waitForTimeout(options.holdAfterPurchaseMs);
+    }
+
+    if (options.pauseAfterPurchase) {
+      await pauseForInspection('    Purchase window is paused. Press Enter to close it and continue...');
+    }
   } catch (error) {
     result.error = String(error?.stack || error?.message || error);
   } finally {
