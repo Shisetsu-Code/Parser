@@ -11,7 +11,9 @@ const DEMO_HOSTS = [
   /(^|\.)pragmaticplay\.com$/i,
   /(^|\.)pragmaticplay\.net$/i,
   /(^|\.)bgaming\.com$/i,
-  /(^|\.)belatragames\.com$/i
+  /(^|\.)belatragames\.com$/i,
+  /(^|\.)bgaming-network\.com$/i,
+  /(^|\.)bltrm\.com$/i
 ];
 
 function permittedTopLevel(url) {
