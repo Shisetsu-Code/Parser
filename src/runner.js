@@ -33,16 +33,37 @@ async function runtimeDebug(page) {
           } catch { return false; }
         };
 
+        const attrs = el => {
+          const out = {};
+          for (const a of [...el.attributes]) {
+            if (
+              /^(href|src|id|class|role|target|onclick)$/i.test(a.name) ||
+              /^data-/i.test(a.name)
+            ) out[a.name] = String(a.value).slice(0, 500);
+          }
+          return out;
+        };
+
         const controls = [...document.querySelectorAll('button,a,[role="button"],[tabindex]')]
           .filter(visible)
-          .slice(0, 30)
-          .map(el => String(el.innerText || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim().replace(/\s+/g, ' ').slice(0, 100))
-          .filter(Boolean);
+          .slice(0, 40)
+          .map(el => ({
+            text: String(el.innerText || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim().replace(/\s+/g, ' ').slice(0, 120),
+            tag: el.tagName.toLowerCase(),
+            attrs: attrs(el)
+          }))
+          .filter(item => item.text);
+
+        const iframes = [...document.querySelectorAll('iframe')].slice(0, 20).map(el => ({
+          src: el.getAttribute('src') || null,
+          attrs: attrs(el)
+        }));
 
         return {
           title: document.title,
           canvas: document.querySelectorAll('canvas').length,
           iframe: document.querySelectorAll('iframe').length,
+          iframes,
           svg: document.querySelectorAll('svg').length,
           video: document.querySelectorAll('video').length,
           controls,
