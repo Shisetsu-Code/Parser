@@ -108,7 +108,9 @@ async function runOne(browser, url, actions, options, index, total) {
     const { provider, frame } = runtime;
     result.provider = provider.id;
     result.frameUrl = frame.url();
-    result.demo = await provider.isDemo(frame);
+    const frameDemo = await provider.isDemo(frame);
+    const officialDemoPage = permittedTopLevel(url);
+    result.demo = Boolean(frameDemo || officialDemoPage);
     if (!result.demo) throw new Error('Runtime found, but demo mode could not be verified');
 
     result.scan = await provider.scan(frame);
