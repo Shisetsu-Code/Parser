@@ -11,6 +11,8 @@ export function parseArgs(argv) {
     timeoutMs: 30_000,
     settleMs: 2_000,
     actionWaitMs: 1_200,
+    pauseAfterPurchase: false,
+    holdAfterPurchaseMs: 0,
     catalog: [],
     maxGames: 0
   };
@@ -25,6 +27,8 @@ export function parseArgs(argv) {
     else if (a === '--timeout') out.timeoutMs = Number(next());
     else if (a === '--settle') out.settleMs = Number(next());
     else if (a === '--action-wait') out.actionWaitMs = Number(next());
+    else if (a === '--pause-after-purchase') out.pauseAfterPurchase = true;
+    else if (a === '--hold-after-purchase') out.holdAfterPurchaseMs = Number(next());
     else if (a === '--catalog') out.catalog.push(next());
     else if (a === '--max-games') out.maxGames = Number(next());
     else if (a === '--help' || a === '-h') out.help = true;
