@@ -19,6 +19,22 @@ export const pragmatic = {
     return frame.evaluate(() => /demogamesfree\.pragmaticplay\.net$/i.test(location.hostname) || /demo/i.test(location.href)).catch(() => false);
   },
 
+  async stateSnapshot(frame) {
+    return frame.evaluate(() => {
+      if (!window.XT || !window.Vars) return null;
+      const read = fn => { try { return fn(); } catch { return null; } };
+      const fp = read(() => XT.GetObject(Vars.FeaturePurchase));
+      const selected = read(() => window.FeaturePurchaseVars ? XT.GetObject(FeaturePurchaseVars.FeaturePurchase_SelectedOption) : null);
+      return {
+        featurePurchaseIndex: fp?.purchaseIndex ?? null,
+        selectedPurchaseIndex: selected?.purchaseIndex ?? null,
+        featurePurchaseWindowIsOpen: read(() => Vars.FeaturePurchaseWindowIsOpen ? XT.GetBool(Vars.FeaturePurchaseWindowIsOpen) : null),
+        canSpin: read(() => Vars.CanSpin ? XT.GetBool(Vars.CanSpin) : null),
+        autoplaySpinsLeft: read(() => Vars.AutoplaySpinsLeft ? XT.GetInt(Vars.AutoplaySpinsLeft) : null)
+      };
+    }).catch(() => null);
+  },
+
   async scan(frame) {
     return frame.evaluate(() => {
       if (!window.globalRuntime || !window.XT || !window.Vars) return { ready: false, controls: [] };
@@ -408,6 +424,18 @@ export const pragmatic = {
                 canPress
               });
             }
+
+            if (typeof item.PurchaseFeature === 'function' && item.PurchaseFeature.length === 0) {
+              add({
+                kind: 'FeaturePurchaseMethod',
+                root: ri,
+                name,
+                active,
+                purchaseIndex,
+                type,
+                method: 'PurchaseFeature'
+              });
+            }
           }
         }
       }
@@ -525,6 +553,42 @@ export const pragmatic = {
           const r = invoke(target);
           return {
             ...r,
+            control: control?.name ?? null,
+            purchaseIndex: control?.purchaseIndex ?? null,
+            type: control?.type ?? null
+          };
+        }
+
+        if (control?.kind === 'FeaturePurchaseMethod' && window.FeaturePurchaseOption) {
+          const matches = [];
+          for (const root of roots) {
+            let items = [];
+            try { items = root.GetComponentsInChildren(FeaturePurchaseOption, true) || []; } catch {}
+            for (const item of items) {
+              let name = null, purchaseIndex = null, type = null;
+              try { name = item.gameObject?.name ?? null; } catch {}
+              try { purchaseIndex = item.purchaseIndex ?? null; } catch {}
+              try { type = item.type ?? null; } catch {}
+              if (String(name || '') === String(control?.name || '') &&
+                  String(purchaseIndex ?? '') === String(control?.purchaseIndex ?? '') &&
+                  String(type ?? '') === String(control?.type ?? '')) {
+                matches.push(item);
+              }
+            }
+          }
+          const preferred = control?.active === true
+            ? matches.filter(item => {
+                try { return item.gameObject?.activeInHierarchy !== false; } catch { return false; }
+              })
+            : matches;
+          const target = preferred[Number(control?.occurrence || 0)] || preferred[0] || matches[Number(control?.occurrence || 0)] || matches[0];
+          if (!target || typeof target.PurchaseFeature !== 'function') {
+            return { ok: false, reason: 'PurchaseFeature method unavailable', control: control?.name ?? null };
+          }
+          target.PurchaseFeature();
+          return {
+            ok: true,
+            strategy: 'FeaturePurchaseOption.PurchaseFeature()',
             control: control?.name ?? null,
             purchaseIndex: control?.purchaseIndex ?? null,
             type: control?.type ?? null
