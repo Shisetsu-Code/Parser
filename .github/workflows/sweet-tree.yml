@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           printf '%s\n' 'https://www.pragmaticplay.com/en/games/sugar-rush-1000/?gamelang=en&cur=USD | tree_all' > target.txt
-          node src/index.js --headless --targets target.txt --timeout 40000 --settle 1800 --action-wait 500 --tree-max-depth 5 --tree-max-states 12 --tree-max-edges 32 --tree-max-controls 8 --tree-auto-wait 8000 --tree-quiet 900 --tree-repeat-limit 20
+          node src/index.js --headless --targets target.txt --timeout 40000 --settle 1800 --action-wait 500 --tree-max-depth 5 --tree-max-states 12 --tree-max-edges 32 --tree-max-controls 16 --tree-auto-wait 8000 --tree-quiet 900 --tree-repeat-limit 20
 
       - name: Show tree/continuations
         if: always()
