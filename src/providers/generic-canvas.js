@@ -1,4 +1,4 @@
-const HOST_RX = /(^|\.)(bgaming\.com|belatragames\.com)$/i;
+const HOST_RX = /(^|\.)(bgaming\.com|belatragames\.com|bgaming-network\.com|bltrm\.com)$/i;
 
 function isGenericOfficialHost(hostname) {
   return HOST_RX.test(String(hostname || ''));
@@ -11,6 +11,27 @@ export const genericCanvas = {
     let host = '';
     try { host = new URL(page.url()).hostname; } catch {}
     if (!isGenericOfficialHost(host)) return { attempted: false };
+
+    // Official provider pages expose the real demo endpoint in data attributes.
+    // Prefer that stable URL over site overlays, modals or headless-sensitive JS.
+    try {
+      const directDemo = await page.evaluate(() => {
+        const candidates = [
+          document.querySelector('[data-iframe-src*="bgaming-network.com"]')?.getAttribute('data-iframe-src'),
+          document.querySelector('[data-copy*="bgaming-network.com"]')?.getAttribute('data-copy'),
+          document.querySelector('iframe.game-frame[data-src]')?.getAttribute('data-src'),
+          document.querySelector('iframe.game-frame[src]')?.getAttribute('src')
+        ].filter(Boolean);
+        return candidates.find(value => /^https?:\/\//i.test(value)) || null;
+      });
+
+      if (directDemo) {
+        await page.goto(directDemo, { waitUntil: 'domcontentloaded', timeout: 15_000 });
+        await page.waitForTimeout(2200);
+        return { attempted: true, direct: true, url: directDemo };
+      }
+    } catch {}
+
 
     const context = page.context();
     const dismissPatterns = [
