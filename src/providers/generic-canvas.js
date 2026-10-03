@@ -344,82 +344,90 @@ export const genericCanvas = {
   },
 
   async pressControl(frame, control) {
-    return frame.evaluate(({ control }) => {
-      const visible = el => {
-        try {
-          const r = el.getBoundingClientRect();
-          const s = getComputedStyle(el);
-          return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
-        } catch {
-          return false;
-        }
-      };
-      const normalize = value => String(value || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+    const page = frame.page();
 
-      try {
-        if (control?.kind === 'DOM') {
-          const selector = 'button,a,[role="button"],[tabindex],input[type="button"],input[type="submit"]';
-          const matches = [...document.querySelectorAll(selector)]
-            .filter(visible)
-            .filter(el => {
-              const tag = el.tagName.toLowerCase();
-              const text = normalize(el.innerText || el.value);
-              const aria = normalize(el.getAttribute('aria-label'));
-              const title = normalize(el.getAttribute('title'));
-              const href = tag === 'a' ? normalize(el.getAttribute('href')) : '';
-              return tag === control.tag &&
-                text === String(control.text || '') &&
-                aria === String(control.aria || '') &&
-                title === String(control.title || '') &&
-                href === String(control.href || '');
-            });
+    try {
+      if (control?.kind === 'CANVAS_TAP') {
+        const canvases = frame.locator('canvas');
+        const visible = [];
+        const count = Math.min(await canvases.count(), 20);
 
-          const target = matches[Number(control.occurrence || 0)] || matches[0];
-          if (!target) return { ok: false, reason: 'DOM target unavailable', control: control.name };
-
-          target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType: 'mouse' }));
-          target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-          target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, pointerType: 'mouse' }));
-          target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-          target.click();
-          return { ok: true, strategy: 'DOM pointer/click', control: control.name };
+        for (let i = 0; i < count; i++) {
+          const locator = canvases.nth(i);
+          const box = await locator.boundingBox().catch(() => null);
+          if (box && box.width > 40 && box.height > 40) visible.push({ locator, box });
         }
 
-        if (control?.kind === 'CANVAS_TAP') {
-          const canvases = [...document.querySelectorAll('canvas')].filter(visible);
-          const target = canvases[Number(control.canvasIndex || 0)] || canvases[0];
-          if (!target) return { ok: false, reason: 'Canvas unavailable', control: control.name };
-
-          const r = target.getBoundingClientRect();
-          const clientX = r.left + r.width * Number(control.nx ?? 0.5);
-          const clientY = r.top + r.height * Number(control.ny ?? 0.5);
-          const common = { bubbles: true, cancelable: true, clientX, clientY };
-
-          target.dispatchEvent(new PointerEvent('pointermove', { ...common, pointerType: 'mouse' }));
-          target.dispatchEvent(new MouseEvent('mousemove', common));
-          target.dispatchEvent(new PointerEvent('pointerdown', { ...common, pointerType: 'mouse', buttons: 1 }));
-          target.dispatchEvent(new MouseEvent('mousedown', { ...common, buttons: 1 }));
-          target.dispatchEvent(new PointerEvent('pointerup', { ...common, pointerType: 'mouse', buttons: 0 }));
-          target.dispatchEvent(new MouseEvent('mouseup', { ...common, buttons: 0 }));
-          target.dispatchEvent(new MouseEvent('click', common));
-
-          return { ok: true, strategy: 'canvas pointer/click', control: control.name, clientX, clientY };
+        const selected = visible[Number(control.canvasIndex || 0)] || visible[0];
+        if (!selected) {
+          return { ok: false, reason: 'Canvas unavailable', control: control.name };
         }
 
-        if (control?.kind === 'KEY') {
-          const key = String(control.key || '');
-          const target = document.activeElement || document.body || document.documentElement;
-          const code = key === ' ' ? 'Space' : key;
-          for (const type of ['keydown','keypress','keyup']) {
-            target.dispatchEvent(new KeyboardEvent(type, { key, code, bubbles: true, cancelable: true }));
-          }
-          return { ok: true, strategy: 'KeyboardEvent', control: control.name, key };
-        }
+        const x = selected.box.x + selected.box.width * Number(control.nx ?? 0.5);
+        const y = selected.box.y + selected.box.height * Number(control.ny ?? 0.5);
 
-        return { ok: false, reason: 'Unsupported generic control kind', kind: control?.kind ?? null };
-      } catch (error) {
-        return { ok: false, reason: String(error?.message || error), control: control?.name ?? null };
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.waitForTimeout(35);
+        await page.mouse.up();
+
+        return {
+          ok: true,
+          strategy: 'Playwright mouse click',
+          control: control.name,
+          x: Math.round(x),
+          y: Math.round(y)
+        };
       }
-    }, { control });
+
+      if (control?.kind === 'KEY') {
+        const key = control.key === ' ' ? 'Space' : String(control.key || '');
+        if (!key) return { ok: false, reason: 'Empty key', control: control.name };
+        await page.keyboard.press(key);
+        return { ok: true, strategy: 'Playwright keyboard.press', control: control.name, key };
+      }
+
+      if (control?.kind === 'DOM') {
+        const selector = 'button,a,[role="button"],[tabindex],input[type="button"],input[type="submit"]';
+        const nodes = frame.locator(selector);
+        const count = Math.min(await nodes.count(), 200);
+        let occurrence = 0;
+
+        for (let i = 0; i < count; i++) {
+          const node = nodes.nth(i);
+          const meta = await node.evaluate(el => {
+            const normalize = value => String(value || '').trim().replace(/\s+/g, ' ').slice(0, 120);
+            const tag = el.tagName.toLowerCase();
+            return {
+              tag,
+              text: normalize(el.innerText || el.value),
+              aria: normalize(el.getAttribute('aria-label')),
+              title: normalize(el.getAttribute('title')),
+              href: tag === 'a' ? normalize(el.getAttribute('href')) : ''
+            };
+          }).catch(() => null);
+
+          if (!meta) continue;
+          if (
+            meta.tag !== control.tag ||
+            meta.text !== String(control.text || '') ||
+            meta.aria !== String(control.aria || '') ||
+            meta.title !== String(control.title || '') ||
+            meta.href !== String(control.href || '')
+          ) continue;
+
+          if (occurrence++ !== Number(control.occurrence || 0)) continue;
+
+          await node.click({ force: true, timeout: 2500 });
+          return { ok: true, strategy: 'Playwright locator.click', control: control.name };
+        }
+
+        return { ok: false, reason: 'DOM target unavailable', control: control.name };
+      }
+
+      return { ok: false, reason: 'Unsupported generic control kind', kind: control?.kind ?? null };
+    } catch (error) {
+      return { ok: false, reason: String(error?.message || error), control: control?.name ?? null };
+    }
   }
 };
