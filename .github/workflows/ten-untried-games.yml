@@ -1,4 +1,4 @@
-name: Generic providers retest v3
+name: BGaming trusted-input retest
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 18
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 3
       matrix:
         include:
           - id: "05-bgaming-burning-chilli-x"
@@ -22,12 +22,6 @@ jobs:
             url: "https://bgaming.com/es/games/royal-beellion-hold-and-win"
           - id: "07-bgaming-aztec-clusters"
             url: "https://bgaming.com/es/games/aztec-clusters"
-          - id: "08-belatra-slime-bonanza"
-            url: "https://free-slot.belatragames.com/play/slime-bonanza"
-          - id: "09-belatra-hunt-the-bucks"
-            url: "https://free-slot.belatragames.com/play/hunt-the-bucks"
-          - id: "10-belatra-ice-bass"
-            url: "https://free-slot.belatragames.com/play/ice-bass"
 
     steps:
       - uses: actions/checkout@v4
@@ -36,23 +30,19 @@ jobs:
           node-version: "24"
       - run: npm install
       - run: npx playwright install --with-deps chromium
-
       - name: Run tree
         shell: bash
         env:
           GAME_URL: ${{ matrix.url }}
         run: |
           printf '%s | tree_all\n' "$GAME_URL" > target.txt
-          node src/index.js             --headless             --targets target.txt             --timeout 40000             --settle 2200             --action-wait 450             --tree-max-depth 3             --tree-max-states 6             --tree-max-edges 12             --tree-max-controls 10             --tree-auto-wait 3500             --tree-quiet 700             --tree-repeat-limit 8
-
+          node src/index.js             --headless             --targets target.txt             --timeout 40000             --settle 2200             --action-wait 450             --tree-max-depth 3             --tree-max-states 6             --tree-max-edges 14             --tree-max-controls 12             --tree-auto-wait 3500             --tree-quiet 700             --tree-repeat-limit 8
       - name: Print compact result
         if: always()
         shell: bash
         run: |
-          echo "=== ${{ matrix.id }} ==="
           cat results/summary.json 2>/dev/null || true
-          grep -R -E 'provider=|tree state=|tree edge=|tree done|replayFailures|continuations|signals=|runtimeDebug|ERROR:' results 2>/dev/null | tail -n 180 || true
-
+          grep -R -E 'provider=|tree state=|tree edge=|tree done|replayFailures|continuations|signals=|runtimeDebug|ERROR:' results 2>/dev/null | tail -n 220 || true
       - name: Upload result
         if: always()
         uses: actions/upload-artifact@v4
