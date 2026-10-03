@@ -365,68 +365,176 @@ export const pragmatic = {
 
   async listControls(frame) {
     const scan = await this.scan(frame);
-    return scan?.controls || [];
-  },
-
-  async pressControl(frame, control) {
-    return frame.evaluate(({ control }) => {
-      if (!window.globalRuntime || !window.XTButton) {
-        return { ok: false, reason: 'Pragmatic runtime unavailable' };
-      }
-
+    const extras = await frame.evaluate(() => {
+      if (!window.globalRuntime) return [];
       const roots = globalRuntime.sceneRoots || [];
-      const matches = [];
-      for (const root of roots) {
-        let buttons = [];
-        try { buttons = root.GetComponentsInChildren(XTButton, true) || []; } catch {}
-        for (const button of buttons) {
-          let name = null;
-          let event = null;
-          try { name = button.gameObject?.name ?? null; } catch {}
-          try { event = button.eventToCode?.name ?? null; } catch {}
-          if (String(name || '') === String(control?.name || '') &&
-              String(event || '') === String(control?.event || '')) {
-            matches.push(button);
+      const out = [];
+      const counts = new Map();
+
+      const add = control => {
+        const key = [
+          control.kind,
+          control.name ?? '',
+          control.purchaseIndex ?? '',
+          control.optionIndex ?? '',
+          control.type ?? ''
+        ].join('|');
+        const occurrence = counts.get(key) || 0;
+        counts.set(key, occurrence + 1);
+        out.push({ ...control, occurrence });
+      };
+
+      if (window.FeaturePurchaseOption) {
+        for (let ri = 0; ri < roots.length; ri++) {
+          let items = [];
+          try { items = roots[ri].GetComponentsInChildren(FeaturePurchaseOption, true) || []; } catch {}
+          for (const item of items) {
+            let name = null, active = null, purchaseIndex = null, type = null;
+            try { name = item.gameObject?.name ?? null; } catch {}
+            try { active = item.gameObject?.activeInHierarchy ?? null; } catch {}
+            try { purchaseIndex = item.purchaseIndex ?? null; } catch {}
+            try { type = item.type ?? null; } catch {}
+            const canClick = typeof item.OnClick === 'function';
+            const canPress = typeof item.OnPress === 'function';
+            if (canClick || canPress) {
+              add({
+                kind: 'FeaturePurchaseOption',
+                root: ri,
+                name,
+                active,
+                purchaseIndex,
+                type,
+                canClick,
+                canPress
+              });
+            }
           }
         }
       }
 
-      const target = matches[Number(control?.occurrence || 0)] || matches[0];
-      if (!target) {
-        return {
-          ok: false,
-          reason: 'Pragmatic control unavailable',
-          control: control?.name ?? null,
-          event: control?.event ?? null
-        };
+      if (window.FeaturePurchaseV2) {
+        for (let ri = 0; ri < roots.length; ri++) {
+          let managers = [];
+          try { managers = roots[ri].GetComponentsInChildren(FeaturePurchaseV2, true) || []; } catch {}
+          for (const manager of managers) {
+            const options = manager.purchaseOptions || [];
+            for (let optionIndex = 0; optionIndex < options.length; optionIndex++) {
+              const option = options[optionIndex];
+              if (!option) continue;
+              let name = null, active = null;
+              try { name = option.gameObject?.name ?? null; } catch {}
+              try { active = option.gameObject?.activeInHierarchy ?? null; } catch {}
+              const methods = ['OnClick', 'Click', 'OnPress'].filter(m => typeof option[m] === 'function');
+              if (methods.length) {
+                add({
+                  kind: 'FeaturePurchaseV2Option',
+                  root: ri,
+                  name,
+                  active,
+                  optionIndex,
+                  methods
+                });
+              }
+            }
+          }
+        }
       }
 
-      try {
+      return out;
+    }).catch(() => []);
+
+    return [...(scan?.controls || []), ...extras];
+  },
+
+  async pressControl(frame, control) {
+    return frame.evaluate(({ control }) => {
+      if (!window.globalRuntime) {
+        return { ok: false, reason: 'Pragmatic runtime unavailable' };
+      }
+
+      const roots = globalRuntime.sceneRoots || [];
+
+      const invoke = target => {
+        if (!target) return { ok: false, reason: 'target unavailable' };
         if (typeof target.OnPress === 'function') {
           target.OnPress(true);
           target.OnPress(false);
-          return {
-            ok: true,
-            control: control?.name ?? null,
-            event: control?.event ?? null,
-            strategy: 'XTButton.OnPress(true/false)'
-          };
+          return { ok: true, strategy: 'OnPress(true/false)' };
         }
         if (typeof target.OnClick === 'function') {
           target.OnClick();
+          return { ok: true, strategy: 'OnClick()' };
+        }
+        if (typeof target.Click === 'function') {
+          target.Click();
+          return { ok: true, strategy: 'Click()' };
+        }
+        return { ok: false, reason: 'No invokable click/press path' };
+      };
+
+      try {
+        if (control?.kind === 'XTButton') {
+          if (!window.XTButton) return { ok: false, reason: 'XTButton unavailable' };
+          const matches = [];
+          for (const root of roots) {
+            let buttons = [];
+            try { buttons = root.GetComponentsInChildren(XTButton, true) || []; } catch {}
+            for (const button of buttons) {
+              let name = null, event = null;
+              try { name = button.gameObject?.name ?? null; } catch {}
+              try { event = button.eventToCode?.name ?? null; } catch {}
+              if (String(name || '') === String(control?.name || '') &&
+                  String(event || '') === String(control?.event || '')) {
+                matches.push(button);
+              }
+            }
+          }
+          const target = matches[Number(control?.occurrence || 0)] || matches[0];
+          const r = invoke(target);
+          return { ...r, control: control?.name ?? null, event: control?.event ?? null };
+        }
+
+        if (control?.kind === 'FeaturePurchaseOption' && window.FeaturePurchaseOption) {
+          const matches = [];
+          for (const root of roots) {
+            let items = [];
+            try { items = root.GetComponentsInChildren(FeaturePurchaseOption, true) || []; } catch {}
+            for (const item of items) {
+              let name = null, purchaseIndex = null, type = null;
+              try { name = item.gameObject?.name ?? null; } catch {}
+              try { purchaseIndex = item.purchaseIndex ?? null; } catch {}
+              try { type = item.type ?? null; } catch {}
+              if (String(name || '') === String(control?.name || '') &&
+                  String(purchaseIndex ?? '') === String(control?.purchaseIndex ?? '') &&
+                  String(type ?? '') === String(control?.type ?? '')) {
+                matches.push(item);
+              }
+            }
+          }
+          const target = matches[Number(control?.occurrence || 0)] || matches[0];
+          const r = invoke(target);
           return {
-            ok: true,
+            ...r,
             control: control?.name ?? null,
-            event: control?.event ?? null,
-            strategy: 'XTButton.OnClick()'
+            purchaseIndex: control?.purchaseIndex ?? null,
+            type: control?.type ?? null
           };
         }
-        return {
-          ok: false,
-          control: control?.name ?? null,
-          event: control?.event ?? null,
-          reason: 'No invokable XTButton path'
-        };
+
+        if (control?.kind === 'FeaturePurchaseV2Option' && window.FeaturePurchaseV2) {
+          const managers = [];
+          for (const root of roots) {
+            try { managers.push(...(root.GetComponentsInChildren(FeaturePurchaseV2, true) || [])); } catch {}
+          }
+          const candidates = managers
+            .map(manager => manager.purchaseOptions?.[Number(control?.optionIndex)])
+            .filter(Boolean);
+          const target = candidates[Number(control?.occurrence || 0)] || candidates[0];
+          const r = invoke(target);
+          return { ...r, control: control?.name ?? null, optionIndex: control?.optionIndex ?? null };
+        }
+
+        return { ok: false, reason: 'Unsupported Pragmatic control kind', kind: control?.kind ?? null };
       } catch (error) {
         return {
           ok: false,
