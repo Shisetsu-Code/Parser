@@ -30,6 +30,9 @@ Options:
   --tree-max-states N   maximum unique states per game (default: 60)
   --tree-max-edges N    maximum tested branches per game (default: 200)
   --tree-max-controls N maximum controls tested from one state (default: 120)
+  --tree-auto-wait MS  maximum passive wait after an active transition (default: 8000)
+  --tree-quiet MS      quiet window used to declare automatic activity settled (default: 900)
+  --tree-repeat-limit N maximum repeated spin/play continuations in a feature path (default: 20)
 `;
 
 async function main() {
