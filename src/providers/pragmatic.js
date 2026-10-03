@@ -489,7 +489,12 @@ export const pragmatic = {
               }
             }
           }
-          const target = matches[Number(control?.occurrence || 0)] || matches[0];
+          const preferred = control?.active === true
+            ? matches.filter(item => {
+                try { return item.gameObject?.activeInHierarchy !== false; } catch { return false; }
+              })
+            : matches;
+          const target = preferred[Number(control?.occurrence || 0)] || preferred[0] || matches[Number(control?.occurrence || 0)] || matches[0];
           const r = invoke(target);
           return { ...r, control: control?.name ?? null, event: control?.event ?? null };
         }
@@ -511,7 +516,12 @@ export const pragmatic = {
               }
             }
           }
-          const target = matches[Number(control?.occurrence || 0)] || matches[0];
+          const preferred = control?.active === true
+            ? matches.filter(item => {
+                try { return item.gameObject?.activeInHierarchy !== false; } catch { return false; }
+              })
+            : matches;
+          const target = preferred[Number(control?.occurrence || 0)] || preferred[0] || matches[Number(control?.occurrence || 0)] || matches[0];
           const r = invoke(target);
           return {
             ...r,
@@ -529,7 +539,12 @@ export const pragmatic = {
           const candidates = managers
             .map(manager => manager.purchaseOptions?.[Number(control?.optionIndex)])
             .filter(Boolean);
-          const target = candidates[Number(control?.occurrence || 0)] || candidates[0];
+          const preferred = control?.active === true
+            ? candidates.filter(item => {
+                try { return item.gameObject?.activeInHierarchy !== false; } catch { return false; }
+              })
+            : candidates;
+          const target = preferred[Number(control?.occurrence || 0)] || preferred[0] || candidates[Number(control?.occurrence || 0)] || candidates[0];
           const r = invoke(target);
           return { ...r, control: control?.name ?? null, optionIndex: control?.optionIndex ?? null };
         }
