@@ -1,0 +1,139 @@
+import path from 'node:path';
+import { chromium } from 'playwright';
+import { findRuntime } from './providers/index.js';
+import { safeName, sleep, summarizeRequest, writeJson } from './lib/common.js';
+
+const DEMO_HOSTS = [
+  /(^|\.)3oaks\.com$/i,
+  /(^|\.)pragmaticplay\.com$/i,
+  /(^|\.)pragmaticplay\.net$/i
+];
+
+function permittedTopLevel(url) {
+  try { return DEMO_HOSTS.some(rx => rx.test(new URL(url).hostname)); }
+  catch { return false; }
+}
+
+export async function discoverCatalog(browser, catalogUrl, options) {
+  if (!permittedTopLevel(catalogUrl)) throw new Error(`Catalog host is not allowed by demo-only mode: ${catalogUrl}`);
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  try {
+    await page.goto(catalogUrl, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
+    await page.waitForTimeout(options.settleMs);
+    const links = await page.locator('a[href]').evaluateAll(nodes => nodes.map(a => a.href));
+    const uniq = [...new Set(links)].filter(url => {
+      try {
+        const u = new URL(url);
+        if (/3oaks\.com$/i.test(u.hostname)) return /\/game\//i.test(u.pathname);
+        if (/pragmaticplay\.com$/i.test(u.hostname)) return /\/games\//i.test(u.pathname) && !/\/games\/?$/i.test(u.pathname);
+      } catch {}
+      return false;
+    });
+    return uniq.map(url => ({ url, actions: [] }));
+  } finally {
+    await context.close();
+  }
+}
+
+export async function run(options, initialTargets) {
+  const browser = await chromium.launch({ headless: options.headless });
+  const results = [];
+  try {
+    let targets = [...initialTargets];
+    for (const catalog of options.catalog) {
+      const found = await discoverCatalog(browser, catalog, options);
+      targets.push(...found);
+    }
+
+    const deduped = [];
+    const seen = new Set();
+    for (const target of targets) {
+      if (!target?.url || seen.has(target.url)) continue;
+      seen.add(target.url);
+      deduped.push(target);
+    }
+    targets = options.maxGames > 0 ? deduped.slice(0, options.maxGames) : deduped;
+
+    for (let index = 0; index < targets.length; index++) {
+      const target = targets[index];
+      const actions = target.actions.length ? target.actions : options.defaultActions;
+      const result = await runOne(browser, target.url, actions, options, index + 1, targets.length);
+      results.push(result);
+    }
+  } finally {
+    await browser.close();
+  }
+  return results;
+}
+
+async function runOne(browser, url, actions, options, index, total) {
+  const result = {
+    url,
+    index,
+    total,
+    startedAt: new Date().toISOString(),
+    provider: null,
+    frameUrl: null,
+    demo: false,
+    scan: null,
+    actions: [],
+    requests: [],
+    error: null
+  };
+
+  if (!permittedTopLevel(url)) {
+    result.error = 'Blocked by demo-only host allowlist';
+    return result;
+  }
+
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  const network = [];
+  page.on('request', req => {
+    const u = req.url();
+    if (/gameService|doSpin|doBonus|gs2c|spin|bonus|feature|purchase/i.test(u) || req.method() !== 'GET') {
+      network.push(summarizeRequest(req));
+    }
+  });
+
+  console.log(`\n[${index}/${total}] ${url}`);
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
+    await page.waitForTimeout(options.settleMs);
+
+    const runtime = await findRuntime(page, options.timeoutMs);
+    if (!runtime) throw new Error('No supported runtime found in page/frames');
+
+    const { provider, frame } = runtime;
+    result.provider = provider.id;
+    result.frameUrl = frame.url();
+    result.demo = await provider.isDemo(frame);
+    if (!result.demo) throw new Error('Runtime found, but demo mode could not be verified');
+
+    result.scan = await provider.scan(frame);
+    console.log(`  provider=${provider.id} frame=${frame.url()}`);
+    console.log(`  controls=${result.scan?.controls?.length ?? 0}`);
+
+    for (const action of actions) {
+      const before = network.length;
+      const started = Date.now();
+      const press = await provider.press(frame, action);
+      await sleep(options.actionWaitMs);
+      const delta = network.slice(before);
+      result.actions.push({ action, press, elapsedMs: Date.now() - started, network: delta });
+      console.log(`  action=${action} ok=${Boolean(press?.ok)} strategy=${press?.strategy ?? '-'} requests=${delta.length}`);
+    }
+
+    result.requests = network;
+  } catch (error) {
+    result.error = String(error?.stack || error?.message || error);
+    console.error(`  ERROR: ${error?.message || error}`);
+  } finally {
+    result.finishedAt = new Date().toISOString();
+    const file = path.join('results', `${String(index).padStart(4, '0')}-${safeName(url)}.json`);
+    await writeJson(file, result);
+    await context.close();
+  }
+  return result;
+}
