@@ -202,5 +202,47 @@ export const threeOaks = {
         return { ok: false, index, reason: String(error?.message || error) };
       }
     }, { index });
+  },
+
+  async listControls(frame) {
+    const scan = await this.scan(frame);
+    return scan?.controls || [];
+  },
+
+  async pressControl(frame, control) {
+    const name = control?.name;
+    return frame.evaluate(({ name }) => {
+      const view = window.GR?.UI?.view;
+      if (!view || !name || !view[name]) {
+        return { ok: false, reason: '3Oaks control unavailable', control: name ?? null };
+      }
+
+      const target = view[name];
+      try {
+        if (typeof target.click === 'function') {
+          target.click();
+          return { ok: true, control: name, strategy: 'view.click()' };
+        }
+        for (const method of ['emit', 'dispatch', 'trigger', 'fire']) {
+          if (typeof target.click?.[method] === 'function') {
+            target.click[method]();
+            return { ok: true, control: name, strategy: 'view.click.' + method + '()' };
+          }
+        }
+        if (typeof target.pointerdown === 'function' || typeof target.pointerup === 'function') {
+          if (typeof target.pointerdown === 'function') target.pointerdown();
+          if (typeof target.pointerup === 'function') target.pointerup();
+          return { ok: true, control: name, strategy: 'pointerdown/pointerup' };
+        }
+        const event = window.GR?.UI?.Events?.[name];
+        if (typeof event === 'function') {
+          event();
+          return { ok: true, control: name, strategy: 'GR.UI.Events.' + name + '()' };
+        }
+        return { ok: false, control: name, reason: 'No invokable path' };
+      } catch (error) {
+        return { ok: false, control: name, reason: String(error?.message || error) };
+      }
+    }, { name });
   }
 };
