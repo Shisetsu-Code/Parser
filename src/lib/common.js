@@ -13,6 +13,10 @@ export function parseArgs(argv) {
     actionWaitMs: 1_200,
     pauseAfterPurchase: false,
     holdAfterPurchaseMs: 0,
+    treeMaxDepth: 4,
+    treeMaxStates: 60,
+    treeMaxEdges: 200,
+    treeMaxControls: 120,
     catalog: [],
     maxGames: 0
   };
@@ -29,6 +33,10 @@ export function parseArgs(argv) {
     else if (a === '--action-wait') out.actionWaitMs = Number(next());
     else if (a === '--pause-after-purchase') out.pauseAfterPurchase = true;
     else if (a === '--hold-after-purchase') out.holdAfterPurchaseMs = Number(next());
+    else if (a === '--tree-max-depth') out.treeMaxDepth = Number(next());
+    else if (a === '--tree-max-states') out.treeMaxStates = Number(next());
+    else if (a === '--tree-max-edges') out.treeMaxEdges = Number(next());
+    else if (a === '--tree-max-controls') out.treeMaxControls = Number(next());
     else if (a === '--catalog') out.catalog.push(next());
     else if (a === '--max-games') out.maxGames = Number(next());
     else if (a === '--help' || a === '-h') out.help = true;
