@@ -1,7 +1,15 @@
 import { threeOaks } from './threeoaks.js';
 import { pragmatic } from './pragmatic.js';
+import { genericCanvas } from './generic-canvas.js';
 
-export const providers = [threeOaks, pragmatic];
+export const providers = [threeOaks, pragmatic, genericCanvas];
+
+export async function bootstrapSupportedPage(page) {
+  for (const provider of providers) {
+    if (typeof provider.bootstrapPage !== 'function') continue;
+    try { await provider.bootstrapPage(page); } catch {}
+  }
+}
 
 export async function findRuntime(page, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
