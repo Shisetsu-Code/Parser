@@ -360,8 +360,6 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
       }
 
       await edgeSession.page.waitForTimeout(actionDelay(options));
-      const delta = edgeSession.network.slice(before);
-      const traffic = trafficSignature(delta);
 
       let childRuntime = null;
       try {
@@ -379,6 +377,12 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
           childSignature = stateSignature(expectedProvider, childRuntime.frame.url(), childControls);
         } catch {}
       }
+
+      // Keep recording until the child state has stabilized. Runtime click handlers
+      // frequently start CAT/tween sequences whose server request arrives well after
+      // the immediate OnClick/OnPress callback returns.
+      const delta = edgeSession.network.slice(before);
+      const traffic = trafficSignature(delta);
 
       const edge = {
         id: 'e' + tree.edges.length,
