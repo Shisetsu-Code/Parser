@@ -585,12 +585,39 @@ export const pragmatic = {
           if (!target || typeof target.PurchaseFeature !== 'function') {
             return { ok: false, reason: 'PurchaseFeature method unavailable', control: control?.name ?? null };
           }
+
           target.PurchaseFeature();
+
+          let pending = (() => {
+            try { return XT.GetObject(Vars.FeaturePurchase)?.purchaseIndex ?? -2; } catch { return -2; }
+          })();
+
+          // Some layouts bind a display/selected component whose PurchaseFeature()
+          // does not own the canonical data object. Fall back to the provider's
+          // manager using the same discovered purchase index.
+          if (pending < 0 && Number(control?.purchaseIndex) >= 0 && window.FeaturePurchaseManager) {
+            for (const root of roots) {
+              let managers = [];
+              try { managers = root.GetComponentsInChildren(FeaturePurchaseManager, true) || []; } catch {}
+              for (const manager of managers) {
+                if (typeof manager.PurchaseFeature === 'function') {
+                  manager.PurchaseFeature(Number(control.purchaseIndex));
+                  pending = (() => {
+                    try { return XT.GetObject(Vars.FeaturePurchase)?.purchaseIndex ?? -2; } catch { return -2; }
+                  })();
+                  if (pending >= 0) break;
+                }
+              }
+              if (pending >= 0) break;
+            }
+          }
+
           return {
             ok: true,
             strategy: 'FeaturePurchaseOption.PurchaseFeature()',
             control: control?.name ?? null,
             purchaseIndex: control?.purchaseIndex ?? null,
+            pendingPurchaseIndex: pending,
             type: control?.type ?? null
           };
         }
