@@ -129,5 +129,76 @@ export const threeOaks = {
         return { ok: false, control: name, reason: String(error?.message || error) };
       }
     }, { normalized, aliases });
+  },
+
+  async listPurchases(frame) {
+    return frame.evaluate(() => {
+      const GR = window.GR;
+      const read = getter => {
+        try { return getter(); } catch { return null; }
+      };
+      const raw = read(() => GR?.Flow?.get?.('context.available_buy_bonus'))
+        ?? read(() => GR?.UI?.model?.get?.('context.available_buy_bonus'))
+        ?? read(() => GR?.UI?.model?.get?.('available_buy_bonus'));
+
+      const simplify = value => {
+        if (value == null || ['string', 'number', 'boolean'].includes(typeof value)) return value;
+        if (typeof value !== 'object') return null;
+        const out = {};
+        for (const key of ['name', 'title', 'text', 'type', 'price', 'cost', 'multiplier', 'available', 'enabled']) {
+          const v = value[key];
+          if (v == null || ['string', 'number', 'boolean'].includes(typeof v)) out[key] = v;
+        }
+        return out;
+      };
+
+      let values = [];
+      if (Array.isArray(raw)) values = raw;
+      else if (raw && typeof raw === 'object') {
+        const keys = Object.keys(raw).sort((a, b) => Number(a) - Number(b));
+        values = keys.map(key => raw[key]);
+      }
+
+      return values.map((value, i) => ({
+        index: i + 1,
+        ordinal: i + 1,
+        available: value?.available ?? value?.enabled ?? true,
+        meta: simplify(value)
+      }));
+    });
+  },
+
+  async purchase(frame, index) {
+    return frame.evaluate(async ({ index }) => {
+      const GR = window.GR;
+      const view = GR?.UI?.view;
+      if (!view) return { ok: false, reason: 'GR.UI.view unavailable', index };
+      const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+      try {
+        if (view.buy_feature) {
+          const disabled = typeof view.buy_feature.disabled === 'function' ? view.buy_feature.disabled() : false;
+          if (!disabled && typeof view.buy_feature.click === 'function') {
+            view.buy_feature.click();
+            await wait(650);
+          }
+        }
+
+        const api = window.app?.board?.buyFeature;
+        if (typeof api?.actBuyFeature === 'function') {
+          api.actBuyFeature(index);
+          return {
+            ok: true,
+            index,
+            strategy: 'GR.UI.view.buy_feature.click() + app.board.buyFeature.actBuyFeature(index)',
+            needsSpin: false
+          };
+        }
+
+        return { ok: false, index, reason: '3Oaks purchase handler app.board.buyFeature.actBuyFeature unavailable' };
+      } catch (error) {
+        return { ok: false, index, reason: String(error?.message || error) };
+      }
+    }, { index });
   }
 };
