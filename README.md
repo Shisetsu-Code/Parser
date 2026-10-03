@@ -169,3 +169,23 @@ Every purchase also saves a screenshot automatically under:
 ```text
 results/screenshots/
 ```
+
+
+## Sweep every runtime button
+
+For traffic-first discovery, use `sweep_all`. The parser enumerates every runtime button it can see, invokes each one once, and records the network delta without trying to classify the button first.
+
+```text
+https://3oaks.com/game/3_aztec_temples | sweep_all
+https://www.pragmaticplay.com/en/games/sweet-craze/?gamelang=en&cur=USD | sweep_all
+```
+
+Each result contains `sweep[]` entries with:
+
+- runtime control name/event;
+- whether invocation succeeded or threw;
+- elapsed time;
+- network requests caused by that control;
+- post-hoc traffic signals such as `spin`, `purchase`, `bonus`, and `bet`.
+
+If a button destroys or leaves the game runtime, the runner reloads the same DEMO game and resumes with the next control.
