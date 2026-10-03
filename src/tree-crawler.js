@@ -16,7 +16,20 @@ function replayDescriptor(control) {
 }
 
 function stateControlKey(control) {
-  return JSON.stringify(replayDescriptor(control));
+  const runtimeState = {};
+  if (control?.state && typeof control.state === 'object') {
+    for (const key of ['visible', 'disabled', 'selected', 'state', 'text', 'price']) {
+      const value = control.state[key];
+      if (value == null || ['string', 'number', 'boolean'].includes(typeof value)) {
+        runtimeState[key] = value ?? null;
+      }
+    }
+  }
+
+  return JSON.stringify({
+    ...replayDescriptor(control),
+    runtimeState
+  });
 }
 
 function stateSignature(providerId, frameUrl, controls) {
@@ -65,26 +78,91 @@ function sortControls(controls) {
 function trafficSignature(requests) {
   const endpoints = [];
   const signals = new Set();
+  let actionRequestCount = 0;
 
   for (const req of requests) {
-    const hay = String(req?.url || '') + ' ' + String(req?.postData || '');
+    const url = String(req?.url || '');
+    const body = String(req?.postData || '');
+    const method = String(req?.method || 'GET').toUpperCase();
+
     try {
-      endpoints.push(new URL(req.url).pathname);
+      endpoints.push(new URL(url).pathname);
     } catch {
-      endpoints.push(String(req?.url || ''));
+      endpoints.push(url);
     }
 
-    if (/doSpin|action.?[=:].?doSpin|command.?[=:].?(play|spin)/i.test(hay)) signals.add('spin');
-    if (/purchased_feature|\bpur(?:chased)?\b|purchase/i.test(hay)) signals.add('purchase');
-    if (/doBonus|bonus/i.test(hay)) signals.add('bonus');
-    if (/bet/i.test(hay)) signals.add('bet');
+    const actionish = method !== 'GET' || /gameService|gs2c|doSpin|doBonus/i.test(url);
+    if (!actionish) continue;
+    actionRequestCount++;
+
+    if (/doSpin|action.?[=:].?doSpin|command.?[=:].?(play|spin)/i.test(body + ' ' + url)) signals.add('spin');
+    if (/purchased_feature|(?:^|[&?{,\s])pur(?:chased)?[=:"']|command.?[=:"'].*purchase/i.test(body)) signals.add('purchase');
+    if (/doBonus|command.?[=:"'].*bonus/i.test(body + ' ' + url)) signals.add('bonus');
+    if (/(?:^|[&?{,\s])bet[=:"']/i.test(body)) signals.add('bet');
   }
 
   return {
     requestCount: requests.length,
+    actionRequestCount,
     signals: [...signals],
     endpoints: [...new Set(endpoints)].slice(0, 30)
   };
+}
+
+function controlIdentity(control) {
+  return [
+    control?.kind ?? '',
+    control?.name ?? '',
+    control?.event ?? '',
+    control?.purchaseIndex ?? '',
+    control?.optionIndex ?? '',
+    control?.type ?? ''
+  ].map(String).join('|');
+}
+
+function controlAvailable(controls, wanted) {
+  const id = controlIdentity(wanted);
+  const matches = controls.filter(control => controlIdentity(control) === id);
+  if (!matches.length) return false;
+  if (wanted?.active === true) return matches.some(control => control?.active === true);
+  return true;
+}
+
+async function observeControls(provider, frame, page, timeoutMs = 3000) {
+  const deadline = Date.now() + Math.max(500, timeoutMs);
+  let best = [];
+  let lastSignature = null;
+  let stable = 0;
+
+  while (Date.now() < deadline) {
+    let controls = [];
+    try {
+      controls = sortControls(await provider.listControls(frame));
+    } catch {}
+
+    if (controls.length >= best.length) best = controls;
+
+    const sig = controls.map(stateControlKey).sort().join('\n');
+    if (controls.length && sig === lastSignature) stable++;
+    else stable = 0;
+    lastSignature = sig;
+
+    if (controls.length && stable >= 2) return controls;
+    await page.waitForTimeout(180);
+  }
+
+  return best;
+}
+
+async function waitForControl(provider, frame, page, wanted, timeoutMs = 3000) {
+  const deadline = Date.now() + Math.max(500, timeoutMs);
+  while (Date.now() < deadline) {
+    let controls = [];
+    try { controls = await provider.listControls(frame); } catch {}
+    if (controlAvailable(controls, wanted)) return true;
+    await page.waitForTimeout(180);
+  }
+  return false;
 }
 
 function actionDelay(options) {
@@ -114,6 +192,8 @@ async function openAtPath(browser, url, expectedProvider, path, options) {
     let runtime = await reacquire(page, expectedProvider, options.timeoutMs);
     if (!runtime) throw new Error('Tree replay: provider runtime not found');
 
+    await observeControls(runtime.provider, runtime.frame, page, Math.min(options.timeoutMs, 4500));
+
     const frameDemo = await runtime.provider.isDemo(runtime.frame).catch(() => false);
     if (!frameDemo) {
       // The parent runner already restricts top-level URLs to official DEMO/provider
@@ -123,6 +203,7 @@ async function openAtPath(browser, url, expectedProvider, path, options) {
 
     for (let i = 0; i < path.length; i++) {
       const step = path[i];
+      await waitForControl(runtime.provider, runtime.frame, page, step, Math.min(options.timeoutMs, 3500));
       const before = network.length;
       let press;
       try {
@@ -148,6 +229,7 @@ async function openAtPath(browser, url, expectedProvider, path, options) {
       if (!runtime) {
         throw new Error('Tree replay lost runtime at step ' + i);
       }
+      await observeControls(runtime.provider, runtime.frame, page, Math.min(options.timeoutMs, 2500));
     }
 
     return { context, page, network, replay, ...runtime };
@@ -201,7 +283,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
 
     let controls;
     try {
-      controls = sortControls(await stateSession.provider.listControls(stateSession.frame));
+      controls = await observeControls(stateSession.provider, stateSession.frame, stateSession.page, Math.min(options.timeoutMs, 4500));
     } catch (error) {
       tree.errors.push({
         phase: 'list-controls',
@@ -292,7 +374,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
 
       if (childRuntime) {
         try {
-          childControls = sortControls(await childRuntime.provider.listControls(childRuntime.frame));
+          childControls = await observeControls(childRuntime.provider, childRuntime.frame, edgeSession.page, Math.min(options.timeoutMs, 3000));
           childControlsCount = childControls.length;
           childSignature = stateSignature(expectedProvider, childRuntime.frame.url(), childControls);
         } catch {}
