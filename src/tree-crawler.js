@@ -90,6 +90,23 @@ function isSpinControl(control) {
   return /(spin|play)/i.test(text) && !/(stopspin|stop_spin)/i.test(text);
 }
 
+function isFeatureishControl(control) {
+  const text = [
+    control?.kind,
+    control?.name,
+    control?.event,
+    control?.method,
+    control?.purchaseIndex,
+    control?.optionIndex
+  ].filter(v => v != null).join(' ').toLowerCase();
+
+  return /(purchase|buy|feature|bonus|free.?spin|confirm|rebuy|o_\d|button\d)/i.test(text);
+}
+
+function pathHasFeatureish(path) {
+  return Array.isArray(path) && path.some(isFeatureishControl);
+}
+
 function sortControls(controls, snapshot = null) {
   const pendingPurchase = snapshotHasPendingPurchase(snapshot);
   return [...controls].sort((a, b) => {
@@ -240,6 +257,97 @@ async function reacquire(page, expectedProvider, timeoutMs) {
   return runtime;
 }
 
+async function captureRuntimeState(runtime) {
+  if (!runtime) {
+    return {
+      runtime: null,
+      controls: null,
+      snapshot: null,
+      signature: null
+    };
+  }
+
+  let controls = [];
+  try { controls = await runtime.provider.listControls(runtime.frame); } catch {}
+  const snapshot = await readStateSnapshot(runtime.provider, runtime.frame);
+  controls = sortControls(controls || [], snapshot);
+
+  return {
+    runtime,
+    controls,
+    snapshot,
+    signature: stateSignature(runtime.provider.id, runtime.frame.url(), controls, snapshot)
+  };
+}
+
+async function settleAutomaticActivity(page, network, expectedProvider, options, initialState = null) {
+  const maxWaitMs = Math.max(500, Number(options.treeAutoWaitMs) || 8000);
+  const quietMs = Math.max(300, Number(options.treeQuietMs) || 900);
+  const pollMs = Math.min(350, Math.max(120, Math.floor(quietMs / 4)));
+
+  const started = Date.now();
+  let lastActivityAt = Date.now();
+  let lastNetworkCount = network.length;
+  let current = initialState;
+  let lastSignature = current?.signature ?? null;
+  const transitions = [];
+
+  while (Date.now() - started < maxWaitMs) {
+    await page.waitForTimeout(pollMs);
+
+    let runtime = null;
+    try { runtime = await reacquire(page, expectedProvider, Math.min(options.timeoutMs, 1800)); } catch {}
+
+    if (!runtime) {
+      return {
+        ...current,
+        runtime: null,
+        terminal: true,
+        waitedMs: Date.now() - started,
+        transitions
+      };
+    }
+
+    const next = await captureRuntimeState(runtime);
+    const networkChanged = network.length !== lastNetworkCount;
+    const stateChanged = next.signature !== lastSignature;
+
+    if (networkChanged || stateChanged) {
+      transitions.push({
+        atMs: Date.now() - started,
+        networkCount: network.length,
+        signature: next.signature,
+        networkChanged,
+        stateChanged
+      });
+      lastActivityAt = Date.now();
+      lastNetworkCount = network.length;
+      lastSignature = next.signature;
+      current = next;
+    } else if (!current) {
+      current = next;
+      lastSignature = next.signature;
+    }
+
+    if (Date.now() - lastActivityAt >= quietMs) {
+      return {
+        ...current,
+        terminal: false,
+        waitedMs: Date.now() - started,
+        transitions
+      };
+    }
+  }
+
+  return {
+    ...current,
+    terminal: !current?.runtime,
+    waitedMs: Date.now() - started,
+    transitions,
+    timedOut: true
+  };
+}
+
 async function openAtPath(browser, url, expectedProvider, path, options) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
@@ -307,10 +415,19 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
   const maxStates = Math.max(1, Number(options.treeMaxStates) || 60);
   const maxEdges = Math.max(1, Number(options.treeMaxEdges) || 200);
   const maxControls = Math.max(1, Number(options.treeMaxControls) || 120);
+  const repeatLimit = Math.max(0, Number(options.treeRepeatLimit) || 20);
 
   const tree = {
     provider: expectedProvider,
-    limits: { maxDepth, maxStates, maxEdges, maxControls },
+    limits: {
+      maxDepth,
+      maxStates,
+      maxEdges,
+      maxControls,
+      autoWaitMs: Math.max(500, Number(options.treeAutoWaitMs) || 8000),
+      quietMs: Math.max(300, Number(options.treeQuietMs) || 900),
+      repeatLimit
+    },
     states: [],
     edges: [],
     interestingEdges: [],
@@ -432,26 +549,132 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
         childRuntime = await reacquire(edgeSession.page, expectedProvider, Math.min(options.timeoutMs, 3000));
       } catch {}
 
-      let childSignature = null;
-      let childControlsCount = null;
-      let childControls = null;
-      let childSnapshot = null;
+      let childState = await captureRuntimeState(childRuntime);
+      let delta = edgeSession.network.slice(before);
+      let traffic = trafficSignature(delta);
 
-      if (childRuntime) {
-        try {
-          childControls = await observeControls(childRuntime.provider, childRuntime.frame, edgeSession.page, Math.min(options.timeoutMs, 3000));
-          childSnapshot = await readStateSnapshot(childRuntime.provider, childRuntime.frame);
-          childControls = sortControls(childControls, childSnapshot);
-          childControlsCount = childControls.length;
-          childSignature = stateSignature(expectedProvider, childRuntime.frame.url(), childControls, childSnapshot);
-        } catch {}
+      const initialStateChanged = Boolean(childState.signature && childState.signature !== signature);
+      const shouldObserveAutomatic =
+        press?.ok &&
+        (
+          traffic.actionRequestCount > 0 ||
+          initialStateChanged ||
+          isFeatureishControl(control) ||
+          pathHasFeatureish(queued.path)
+        );
+
+      let automatic = null;
+      if (shouldObserveAutomatic && childRuntime) {
+        automatic = await settleAutomaticActivity(
+          edgeSession.page,
+          edgeSession.network,
+          expectedProvider,
+          options,
+          childState
+        );
+        childState = automatic;
+        childRuntime = automatic.runtime;
+        delta = edgeSession.network.slice(before);
+        traffic = trafficSignature(delta);
       }
 
-      // Keep recording until the child state has stabilized. Runtime click handlers
-      // frequently start CAT/tween sequences whose server request arrives well after
-      // the immediate OnClick/OnPress callback returns.
-      const delta = edgeSession.network.slice(before);
-      const traffic = trafficSignature(delta);
+      const continuations = [];
+      const featureContext =
+        pathHasFeatureish(queued.path) ||
+        isFeatureishControl(control) ||
+        snapshotHasPendingPurchase(snapshot) ||
+        snapshotHasPendingPurchase(childState.snapshot);
+
+      if (
+        repeatLimit > 0 &&
+        press?.ok &&
+        isSpinControl(control) &&
+        featureContext &&
+        childRuntime
+      ) {
+        for (let repeatIndex = 0; repeatIndex < repeatLimit; repeatIndex++) {
+          const available = controlAvailable(childState.controls || [], control);
+          if (!available) break;
+
+          const repeatBefore = edgeSession.network.length;
+          let repeatPress;
+          try {
+            repeatPress = await childRuntime.provider.pressControl(childRuntime.frame, control);
+          } catch (error) {
+            repeatPress = { ok: false, reason: String(error?.message || error) };
+          }
+
+          if (!repeatPress?.ok) {
+            continuations.push({
+              index: repeatIndex,
+              control,
+              press: repeatPress,
+              traffic: { requestCount: 0, actionRequestCount: 0, signals: [], endpoints: [] }
+            });
+            break;
+          }
+
+          await edgeSession.page.waitForTimeout(actionDelay(options));
+
+          let nextRuntime = null;
+          try {
+            nextRuntime = await reacquire(edgeSession.page, expectedProvider, Math.min(options.timeoutMs, 3000));
+          } catch {}
+
+          let nextState = await captureRuntimeState(nextRuntime);
+          const immediateRepeatTraffic = trafficSignature(edgeSession.network.slice(repeatBefore));
+
+          let repeatAutomatic = null;
+          if (
+            nextRuntime &&
+            (
+              immediateRepeatTraffic.actionRequestCount > 0 ||
+              nextState.signature !== childState.signature
+            )
+          ) {
+            repeatAutomatic = await settleAutomaticActivity(
+              edgeSession.page,
+              edgeSession.network,
+              expectedProvider,
+              options,
+              nextState
+            );
+            nextState = repeatAutomatic;
+            nextRuntime = repeatAutomatic.runtime;
+          }
+
+          const repeatDelta = edgeSession.network.slice(repeatBefore);
+          const repeatTraffic = trafficSignature(repeatDelta);
+
+          continuations.push({
+            index: repeatIndex,
+            control,
+            press: repeatPress,
+            traffic: repeatTraffic,
+            waitedMs: repeatAutomatic?.waitedMs ?? 0,
+            transitions: repeatAutomatic?.transitions ?? [],
+            toSignature: nextState.signature ?? null
+          });
+
+          childState = nextState;
+          childRuntime = nextRuntime;
+
+          if (!childRuntime) break;
+          if (repeatTraffic.actionRequestCount === 0 && repeatTraffic.signals.length === 0) break;
+
+          // If another interaction replaces the spin/play path, let the normal tree
+          // explore that new state instead of forcing more repeats.
+          if (!controlAvailable(childState.controls || [], control)) break;
+        }
+
+        delta = edgeSession.network.slice(before);
+        traffic = trafficSignature(delta);
+      }
+
+      const childSignature = childState.signature ?? null;
+      const childControls = childState.controls ?? null;
+      const childControlsCount = childControls?.length ?? null;
+      const childSnapshot = childState.snapshot ?? null;
 
       const edge = {
         id: 'e' + tree.edges.length,
@@ -465,7 +688,13 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
         terminal: !childRuntime,
         toSignature: childSignature,
         childControlsCount,
-        childSnapshot
+        childSnapshot,
+        automatic: automatic ? {
+          waitedMs: automatic.waitedMs,
+          timedOut: Boolean(automatic.timedOut),
+          transitions: automatic.transitions
+        } : null,
+        continuations
       };
 
       tree.edges.push(edge);
@@ -496,7 +725,13 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
       ) {
         scheduledStates.add(childSignature);
         queue.push({
-          path: [...queued.path, control],
+          path: [
+            ...queued.path,
+            control,
+            ...continuations
+              .filter(item => item?.press?.ok)
+              .map(item => item.control)
+          ],
           depth: queued.depth + 1,
           predictedSignature: childSignature
         });
