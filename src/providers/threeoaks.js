@@ -35,8 +35,11 @@ export const threeOaks = {
       const safeCall = (obj, key) => {
         try {
           const v = obj?.[key];
-          if (typeof v === 'function' && v.length === 0) return v.call(obj);
-          if (typeof v !== 'function' && ['string', 'number', 'boolean'].includes(typeof v)) return v;
+          if (typeof v === 'function' && v.length === 0) {
+            const out = v.call(obj);
+            return out == null || ['string', 'number', 'boolean'].includes(typeof out) ? out : undefined;
+          }
+          if (typeof v !== 'function' && (v == null || ['string', 'number', 'boolean'].includes(typeof v))) return v;
         } catch {}
         return undefined;
       };
