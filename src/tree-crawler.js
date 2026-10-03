@@ -11,6 +11,7 @@ function replayDescriptor(control) {
     purchaseIndex: control?.purchaseIndex ?? null,
     optionIndex: control?.optionIndex ?? null,
     type: control?.type ?? null,
+    method: control?.method ?? null,
     active: control?.active ?? null
   };
 }
@@ -32,7 +33,7 @@ function stateControlKey(control) {
   });
 }
 
-function stateSignature(providerId, frameUrl, controls) {
+function stateSignature(providerId, frameUrl, controls, snapshot = null) {
   let path = frameUrl;
   try {
     const u = new URL(frameUrl);
@@ -42,6 +43,7 @@ function stateSignature(providerId, frameUrl, controls) {
   const payload = JSON.stringify({
     provider: providerId,
     frame: path,
+    snapshot,
     controls: controls.map(stateControlKey).sort()
   });
 
@@ -55,11 +57,13 @@ function controlPriority(control) {
     control?.event,
     control?.purchaseIndex,
     control?.optionIndex,
-    control?.type
+    control?.type,
+    control?.method
   ].filter(v => v != null).join(' ').toLowerCase();
 
   let score = 0;
   if (control?.active === true) score += 100;
+  if (/purchasefeature/i.test(text)) score += 650;
   if (/(purchase|buy|feature|confirm|rebuy|o_\d|button\d)/i.test(text)) score += 300;
   if (/(intro|continue|start|close|ok)/i.test(text)) score += 160;
   if (/(spin|play)/i.test(text)) score += 40;
@@ -67,8 +71,32 @@ function controlPriority(control) {
   return score;
 }
 
-function sortControls(controls) {
+function snapshotHasPendingPurchase(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return false;
+  for (const key of ['featurePurchaseIndex', 'purchaseIndex', 'pendingPurchaseIndex']) {
+    const value = Number(snapshot[key]);
+    if (Number.isFinite(value) && value >= 0) return true;
+  }
+  return snapshot.pendingPurchase === true;
+}
+
+function isSpinControl(control) {
+  const text = [
+    control?.kind,
+    control?.name,
+    control?.event,
+    control?.method
+  ].filter(Boolean).join(' ').toLowerCase();
+  return /(spin|play)/i.test(text) && !/(stopspin|stop_spin)/i.test(text);
+}
+
+function sortControls(controls, snapshot = null) {
+  const pendingPurchase = snapshotHasPendingPurchase(snapshot);
   return [...controls].sort((a, b) => {
+    if (pendingPurchase) {
+      const spinDelta = Number(isSpinControl(b)) - Number(isSpinControl(a));
+      if (spinDelta) return spinDelta;
+    }
     const p = controlPriority(b) - controlPriority(a);
     if (p) return p;
     return stateControlKey(a).localeCompare(stateControlKey(b));
@@ -116,7 +144,8 @@ function controlIdentity(control) {
     control?.event ?? '',
     control?.purchaseIndex ?? '',
     control?.optionIndex ?? '',
-    control?.type ?? ''
+    control?.type ?? '',
+    control?.method ?? ''
   ].map(String).join('|');
 }
 
@@ -126,6 +155,16 @@ function controlAvailable(controls, wanted) {
   if (!matches.length) return false;
   if (wanted?.active === true) return matches.some(control => control?.active === true);
   return true;
+}
+
+async function readStateSnapshot(provider, frame) {
+  if (typeof provider?.stateSnapshot !== 'function') return null;
+  try {
+    const snapshot = await provider.stateSnapshot(frame);
+    return snapshot && typeof snapshot === 'object' ? snapshot : null;
+  } catch {
+    return null;
+  }
 }
 
 async function observeControls(provider, frame, page, timeoutMs = 3000) {
@@ -295,7 +334,9 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
       continue;
     }
 
-    const signature = stateSignature(expectedProvider, stateSession.frame.url(), controls);
+    const snapshot = await readStateSnapshot(stateSession.provider, stateSession.frame);
+    controls = sortControls(controls, snapshot);
+    const signature = stateSignature(expectedProvider, stateSession.frame.url(), controls, snapshot);
 
     if (seenStates.has(signature)) {
       tree.stats.dedupedStates++;
@@ -314,6 +355,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
       path: queued.path,
       controlsCount: controls.length,
       controls: controls.slice(0, maxControls).map(replayDescriptor),
+      snapshot,
       replay: stateSession.replay
     });
 
@@ -369,12 +411,15 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
       let childSignature = null;
       let childControlsCount = null;
       let childControls = null;
+      let childSnapshot = null;
 
       if (childRuntime) {
         try {
           childControls = await observeControls(childRuntime.provider, childRuntime.frame, edgeSession.page, Math.min(options.timeoutMs, 3000));
+          childSnapshot = await readStateSnapshot(childRuntime.provider, childRuntime.frame);
+          childControls = sortControls(childControls, childSnapshot);
           childControlsCount = childControls.length;
-          childSignature = stateSignature(expectedProvider, childRuntime.frame.url(), childControls);
+          childSignature = stateSignature(expectedProvider, childRuntime.frame.url(), childControls, childSnapshot);
         } catch {}
       }
 
@@ -395,7 +440,8 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
         network: delta,
         terminal: !childRuntime,
         toSignature: childSignature,
-        childControlsCount
+        childControlsCount,
+        childSnapshot
       };
 
       tree.edges.push(edge);
