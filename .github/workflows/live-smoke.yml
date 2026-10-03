@@ -9,6 +9,10 @@ on:
       - "package.json"
       - "src/**"
 
+concurrency:
+  group: parser-live-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   live-smoke:
     runs-on: ubuntu-latest
