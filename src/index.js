@@ -26,6 +26,10 @@ Options:
   --action-wait MS      wait after each press (default: 1200)
   --pause-after-purchase wait for Enter before closing each purchase window
   --hold-after-purchase MS keep each purchase window open for N milliseconds
+  --tree-max-depth N    maximum replay path depth (default: 4)
+  --tree-max-states N   maximum unique states per game (default: 60)
+  --tree-max-edges N    maximum tested branches per game (default: 200)
+  --tree-max-controls N maximum controls tested from one state (default: 120)
 `;
 
 async function main() {
