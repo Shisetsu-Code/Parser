@@ -1,0 +1,30 @@
+name: Sweet Craze tree check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/sweet-tree.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Run Sweet Craze tree
+        shell: bash
+        run: |
+          printf '%s\n' 'https://www.pragmaticplay.com/en/games/sweet-craze/?gamelang=en&cur=USD | tree_all' > sweet-target.txt
+          node src/index.js --headless --targets sweet-target.txt --timeout 40000 --settle 1800 --action-wait 500 --tree-max-depth 4 --tree-max-states 8 --tree-max-edges 20 --tree-max-controls 6
+      - name: Show purchase traffic
+        if: always()
+        shell: bash
+        run: |
+          grep -R -E '"name": "O_[01]"|"name": "ConfirmBuy"|"name": "StartSpin_Button"|pur=|purchased_feature' results || true
