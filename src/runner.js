@@ -73,6 +73,36 @@ function isBuyAllAction(action) {
   return ['buy_all', 'purchase_all'].includes(String(action || '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
 }
 
+function isSweepAction(action) {
+  return ['sweep', 'sweep_all', 'fuzz', 'fuzz_all'].includes(String(action || '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
+}
+
+function trafficSignature(requests) {
+  const endpoints = [];
+  const signals = new Set();
+
+  for (const req of requests) {
+    const hay = String(req?.url || '') + ' ' + String(req?.postData || '');
+    try {
+      const u = new URL(req.url);
+      endpoints.push(u.pathname);
+    } catch {
+      endpoints.push(String(req?.url || ''));
+    }
+
+    if (/doSpin|action.?[=:].?doSpin|command.?[=:].?(play|spin)/i.test(hay)) signals.add('spin');
+    if (/purchased_feature|\bpur(?:chased)?[=:]/i.test(hay)) signals.add('purchase');
+    if (/doBonus|bonus/i.test(hay)) signals.add('bonus');
+    if (/bet/i.test(hay)) signals.add('bet');
+  }
+
+  return {
+    requestCount: requests.length,
+    signals: [...signals],
+    endpoints: [...new Set(endpoints)].slice(0, 20)
+  };
+}
+
 function hasGameplayRequest(requests) {
   return requests.some(req => {
     const hay = String(req?.url || '') + ' ' + String(req?.postData || '');
@@ -178,6 +208,7 @@ async function runOne(browser, url, actions, options, index, total) {
     actions: [],
     purchaseOptions: [],
     purchases: [],
+    sweep: [],
     requests: [],
     error: null
   };
@@ -217,6 +248,67 @@ async function runOne(browser, url, actions, options, index, total) {
     console.log(`  provider=${provider.id} frame=${frame.url()}`);
     console.log(`  controls=${result.scan?.controls?.length ?? 0}`);
 
+    const sweepAll = actions.some(isSweepAction);
+    if (sweepAll) {
+      if (typeof provider.listControls !== 'function' || typeof provider.pressControl !== 'function') {
+        throw new Error(`Provider ${provider.id} does not implement control sweep`);
+      }
+
+      const controls = await provider.listControls(frame);
+      console.log(`  sweep-controls=${controls.length}`);
+      let sweepFrame = frame;
+
+      for (let controlIndex = 0; controlIndex < controls.length; controlIndex++) {
+        const control = controls[controlIndex];
+        const before = network.length;
+        const started = Date.now();
+        let press;
+
+        try {
+          press = await provider.pressControl(sweepFrame, control);
+        } catch (error) {
+          press = { ok: false, reason: String(error?.message || error) };
+        }
+
+        await page.waitForTimeout(Math.min(Math.max(options.actionWaitMs, 250), 900));
+        const delta = network.slice(before);
+        const signature = trafficSignature(delta);
+
+        result.sweep.push({
+          index: controlIndex,
+          control,
+          press,
+          elapsedMs: Date.now() - started,
+          traffic: signature,
+          network: delta
+        });
+
+        console.log(
+          `  sweep[${controlIndex + 1}/${controls.length}] ${control.name ?? '?'} ` +
+          `event=${control.event ?? '-'} ok=${Boolean(press?.ok)} ` +
+          `requests=${signature.requestCount} signals=${signature.signals.join(',') || '-'}`
+        );
+
+        // If a control navigated away, destroyed the frame or left the game runtime,
+        // reload the same DEMO game and continue with the next discovered control.
+        let runtimeStillThere = false;
+        try {
+          runtimeStillThere = Boolean(await findRuntime(page, 1200));
+        } catch {}
+
+        if (!runtimeStillThere && controlIndex < controls.length - 1) {
+          console.log('    runtime lost; reloading game before next control');
+          await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
+          await page.waitForTimeout(options.settleMs);
+          const recovered = await findRuntime(page, options.timeoutMs);
+          if (!recovered || recovered.provider.id !== provider.id) {
+            throw new Error('Could not recover provider runtime during sweep');
+          }
+          sweepFrame = recovered.frame;
+        }
+      }
+    }
+
     const buyAll = actions.some(isBuyAllAction);
     if (buyAll) {
       if (typeof provider.listPurchases !== 'function' || typeof provider.purchase !== 'function') {
@@ -242,7 +334,7 @@ async function runOne(browser, url, actions, options, index, total) {
       }
     }
 
-    for (const action of actions.filter(action => !isBuyAllAction(action))) {
+    for (const action of actions.filter(action => !isBuyAllAction(action) && !isSweepAction(action))) {
       const before = network.length;
       const started = Date.now();
       const press = await provider.press(frame, action);
