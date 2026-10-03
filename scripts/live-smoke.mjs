@@ -22,7 +22,7 @@ const options = {
 };
 
 async function writeTargets(file, urls) {
-  const body = urls.map(url => `${url} | sweep_all`).join('\n') + '\n';
+  const body = urls.map(url => `${url} | tree_all`).join('\n') + '\n';
   await fs.writeFile(file, body, 'utf8');
 }
 
@@ -43,7 +43,11 @@ function runParser(name, targetFile) {
     '--targets', targetFile,
     '--timeout', '45000',
     '--settle', '5000',
-    '--action-wait', '600'
+    '--action-wait', '500',
+    '--tree-max-depth', '4',
+    '--tree-max-states', '12',
+    '--tree-max-edges', '36',
+    '--tree-max-controls', '24'
   ], {
     cwd: ROOT,
     stdio: 'inherit'
