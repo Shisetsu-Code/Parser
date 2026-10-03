@@ -17,6 +17,9 @@ export function parseArgs(argv) {
     treeMaxStates: 60,
     treeMaxEdges: 200,
     treeMaxControls: 120,
+    treeAutoWaitMs: 8_000,
+    treeQuietMs: 900,
+    treeRepeatLimit: 20,
     catalog: [],
     maxGames: 0
   };
@@ -37,6 +40,9 @@ export function parseArgs(argv) {
     else if (a === '--tree-max-states') out.treeMaxStates = Number(next());
     else if (a === '--tree-max-edges') out.treeMaxEdges = Number(next());
     else if (a === '--tree-max-controls') out.treeMaxControls = Number(next());
+    else if (a === '--tree-auto-wait') out.treeAutoWaitMs = Number(next());
+    else if (a === '--tree-quiet') out.treeQuietMs = Number(next());
+    else if (a === '--tree-repeat-limit') out.treeRepeatLimit = Number(next());
     else if (a === '--catalog') out.catalog.push(next());
     else if (a === '--max-games') out.maxGames = Number(next());
     else if (a === '--help' || a === '-h') out.help = true;
