@@ -206,19 +206,61 @@ export const threeOaks = {
 
   async listControls(frame) {
     const scan = await this.scan(frame);
-    return scan?.controls || [];
+    const extras = await frame.evaluate(() => {
+      const components = window.app?.buyFeature?._components || {};
+      const out = [];
+      for (const [name, target] of Object.entries(components)) {
+        if (!target || (typeof target !== 'object' && typeof target !== 'function')) continue;
+        const methods = ['emitClick', 'click', 'pointerdown', 'pointerup']
+          .filter(method => typeof target?.[method] === 'function');
+        if (!methods.length) continue;
+        out.push({
+          kind: 'app.buyFeature.component',
+          name,
+          active: (() => {
+            try { return target.visible ?? target.active ?? null; } catch { return null; }
+          })(),
+          methods
+        });
+      }
+      return out;
+    }).catch(() => []);
+
+    return [
+      ...(scan?.controls || []).map(control => ({ ...control, kind: control.kind || 'GR.UI.view' })),
+      ...extras
+    ];
   },
 
   async pressControl(frame, control) {
     const name = control?.name;
-    return frame.evaluate(({ name }) => {
-      const view = window.GR?.UI?.view;
-      if (!view || !name || !view[name]) {
-        return { ok: false, reason: '3Oaks control unavailable', control: name ?? null };
-      }
-
-      const target = view[name];
+    return frame.evaluate(({ control, name }) => {
       try {
+        if (control?.kind === 'app.buyFeature.component') {
+          const target = window.app?.buyFeature?._components?.[name];
+          if (!target) return { ok: false, reason: '3Oaks buyFeature component unavailable', control: name ?? null };
+          if (typeof target.emitClick === 'function') {
+            target.emitClick();
+            return { ok: true, control: name, strategy: 'app.buyFeature._components[name].emitClick()' };
+          }
+          if (typeof target.click === 'function') {
+            target.click();
+            return { ok: true, control: name, strategy: 'app.buyFeature._components[name].click()' };
+          }
+          if (typeof target.pointerdown === 'function' || typeof target.pointerup === 'function') {
+            if (typeof target.pointerdown === 'function') target.pointerdown();
+            if (typeof target.pointerup === 'function') target.pointerup();
+            return { ok: true, control: name, strategy: 'buyFeature pointerdown/pointerup' };
+          }
+          return { ok: false, control: name, reason: 'No invokable buyFeature component path' };
+        }
+
+        const view = window.GR?.UI?.view;
+        if (!view || !name || !view[name]) {
+          return { ok: false, reason: '3Oaks control unavailable', control: name ?? null };
+        }
+
+        const target = view[name];
         if (typeof target.click === 'function') {
           target.click();
           return { ok: true, control: name, strategy: 'view.click()' };
@@ -243,6 +285,6 @@ export const threeOaks = {
       } catch (error) {
         return { ok: false, control: name, reason: String(error?.message || error) };
       }
-    }, { name });
+    }, { control, name });
   }
 };
