@@ -106,3 +106,35 @@ The adapter first tries the control object itself, then its click emitter/pointe
 The captured games expose reusable provider runtimes instead of only pixels. Pragmatic exposes `globalRuntime`, `XTButton`, `XT`, and `Vars`; 3Oaks GameRunner exposes `GR.UI.view` / `GR.UI.Events`. The parser uses those runtime objects directly and records the corresponding network delta after the interaction.
 
 V1 deliberately does not invent canvas coordinates. If a control is not exposed by the provider runtime, it reports it as unresolved so a provider-specific adapter can be added cleanly.
+
+
+## Execute demo purchases
+
+Use `buy_all` to discover the purchase options exposed by the game and execute each available option once. Every option is loaded in a fresh browser context so a bought feature cannot prevent the next option from being tested.
+
+```text
+https://3oaks.com/game/3_aztec_temples | buy_all
+https://www.pragmaticplay.com/en/games/sweet-craze/?gamelang=en&cur=USD | buy_all
+```
+
+Then run:
+
+```bash
+npm start
+```
+
+You can also run a catalog sample:
+
+```bash
+npm start -- --catalog https://3oaks.com/games --actions buy_all --max-games 1
+```
+
+Explicit purchase selection is available for diagnostics:
+
+- `buy_1` = first visible purchase option
+- `buy_2` = second visible purchase option
+- `buy_3` = third visible purchase option
+
+For 3Oaks the adapter opens the provider buy-feature control and routes the selected option through `app.board.buyFeature.actBuyFeature(option)`. For Pragmatic it invokes the real `FeaturePurchaseOption.OnClick()` component when available, including the confirm option, and falls back to the provider's purchase manager only when the button component is unavailable.
+
+Purchase execution remains restricted to the official DEMO hosts allowed by the runner.
