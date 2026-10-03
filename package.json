@@ -1,0 +1,17 @@
+{
+  "name": "game-control-parser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Playwright parser for discovering and pressing runtime game controls without vision.",
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/index.js && node --check src/runner.js && node --check src/providers/threeoaks.js && node --check src/providers/pragmatic.js"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
