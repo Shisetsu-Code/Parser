@@ -17,7 +17,7 @@ export async function findRuntime(page, timeoutMs = 30_000) {
     const frames = page.frames();
     for (const frame of frames) {
       for (const provider of providers) {
-        if (await provider.detect(frame)) return { provider, frame };
+        if (await provider.detect(frame, page)) return { provider, frame };
       }
     }
     await page.waitForTimeout(250);
