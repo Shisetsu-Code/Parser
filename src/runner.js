@@ -323,15 +323,21 @@ async function runOne(browser, url, actions, options, index, total) {
         // options, confirm buttons, etc.) and append only genuinely new states.
         try {
           const discovered = await provider.listControls(sweepFrame);
-          let added = 0;
+          const fresh = [];
           for (const candidate of discovered) {
             const key = controlKey(candidate);
             if (seenControls.has(key)) continue;
             seenControls.add(key);
-            controls.push(candidate);
-            added++;
+            fresh.push(candidate);
           }
-          if (added) console.log(`    discovered +${added} controls (queue=${controls.length})`);
+
+          if (fresh.length) {
+            // Explore newly exposed controls immediately while the menu/state that
+            // revealed them is still alive. Active controls get first priority.
+            fresh.sort((a, b) => Number(b?.active === true) - Number(a?.active === true));
+            controls.splice(controlIndex + 1, 0, ...fresh);
+            console.log(`    discovered +${fresh.length} controls, prioritizing now (queue=${controls.length})`);
+          }
         } catch {}
       }
     }
