@@ -24,7 +24,7 @@ const options = {
 };
 
 async function writeTargets(file, urls) {
-  const body = urls.map(url => `${url} | buy_all`).join('\n') + '\n';
+  const body = urls.map(url => `${url} | sweep_all`).join('\n') + '\n';
   await fs.writeFile(file, body, 'utf8');
 }
 
