@@ -1,4 +1,4 @@
-name: Ten untried games matrix
+name: Generic providers retest
 
 on:
   workflow_dispatch:
@@ -13,19 +13,11 @@ jobs:
     timeout-minutes: 18
     strategy:
       fail-fast: false
-      max-parallel: 5
+      max-parallel: 4
       matrix:
         include:
-          - id: "01-3oaks-grand"
-            url: "https://3oaks.com/game/grand"
-          - id: "02-3oaks-thunder-tiger"
-            url: "https://3oaks.com/game/thunder_tiger"
-          - id: "03-pragmatic-freya-1000"
-            url: "https://www.pragmaticplay.com/en/games/freya-1000/?cur=USD&gamelang=en"
-          - id: "04-pragmatic-coven-rising"
-            url: "https://www.pragmaticplay.com/en/games/coven-rising/?cur=USD&gamelang=en"
-          - id: "05-bgaming-johnny-vs-chicken"
-            url: "https://bgaming.com/es/games/johnny-vs-chicken"
+          - id: "05-bgaming-burning-chilli-x"
+            url: "https://bgaming.com/es/games/burning-chilli-x"
           - id: "06-bgaming-royal-beellion"
             url: "https://bgaming.com/es/games/royal-beellion-hold-and-win"
           - id: "07-bgaming-aztec-clusters"
@@ -39,13 +31,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-
       - run: npm install
-
       - run: npx playwright install --with-deps chromium
 
       - name: Run tree
@@ -54,7 +43,7 @@ jobs:
           GAME_URL: ${{ matrix.url }}
         run: |
           printf '%s | tree_all\n' "$GAME_URL" > target.txt
-          node src/index.js             --headless             --targets target.txt             --timeout 35000             --settle 1800             --action-wait 450             --tree-max-depth 3             --tree-max-states 6             --tree-max-edges 12             --tree-max-controls 10             --tree-auto-wait 3500             --tree-quiet 700             --tree-repeat-limit 8
+          node src/index.js             --headless             --targets target.txt             --timeout 40000             --settle 2200             --action-wait 450             --tree-max-depth 3             --tree-max-states 6             --tree-max-edges 12             --tree-max-controls 10             --tree-auto-wait 3500             --tree-quiet 700             --tree-repeat-limit 8
 
       - name: Print compact result
         if: always()
@@ -62,7 +51,7 @@ jobs:
         run: |
           echo "=== ${{ matrix.id }} ==="
           cat results/summary.json 2>/dev/null || true
-          grep -R -E 'provider=|tree state=|tree edge=|tree done|replayFailures|continuations|signals=' results 2>/dev/null | tail -n 120 || true
+          grep -R -E 'provider=|tree state=|tree edge=|tree done|replayFailures|continuations|signals=|ERROR:' results 2>/dev/null | tail -n 140 || true
 
       - name: Upload result
         if: always()
