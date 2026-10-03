@@ -1,0 +1,39 @@
+name: Parser live smoke
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/live-smoke.yml"
+      - "scripts/live-smoke.mjs"
+      - "package.json"
+      - "src/**"
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run live smoke harness
+        run: npm run live:smoke
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parser-live-smoke
+          path: artifacts-out
+          if-no-files-found: warn
+          retention-days: 7
