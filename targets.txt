@@ -1,0 +1,4 @@
+# One URL per line. Optional actions after |, comma separated.
+# Examples:
+# https://3oaks.com/game/3_aztec_temples | spin,buy_feature
+# https://www.pragmaticplay.com/en/games/sweet-craze/?gamelang=en&cur=USD | spin
