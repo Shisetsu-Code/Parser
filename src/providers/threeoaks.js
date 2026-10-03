@@ -81,6 +81,8 @@ export const threeOaks = {
 
   async press(frame, action) {
     const normalized = normalizeAction(action);
+    const buyMatch = normalized.match(/^(?:buy|purchase)_(\\d+)$/);
+    if (buyMatch) return this.purchase(frame, Number(buyMatch[1]));
     const aliases = ALIASES[normalized] || [normalized];
 
     return frame.evaluate(({ normalized, aliases }) => {
