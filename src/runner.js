@@ -1,5 +1,5 @@
 import path from 'node:path';
-import readline from 'node:readline/promises';
+import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { chromium } from 'playwright';
 import { findRuntime } from './providers/index.js';
@@ -85,7 +85,7 @@ async function pauseForInspection(message) {
     console.log('    stdin is not interactive; skipping Enter pause');
     return;
   }
-  const rl = readline.createInterface({ input, output });
+  const rl = createInterface({ input, output });
   try {
     await rl.question(message);
   } finally {
