@@ -2,14 +2,16 @@ import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { chromium } from 'playwright';
-import { findRuntime } from './providers/index.js';
+import { bootstrapSupportedPage, findRuntime } from './providers/index.js';
 import { runTreeCrawler } from './tree-crawler.js';
 import { ensureDir, safeName, sleep, summarizeRequest, writeJson } from './lib/common.js';
 
 const DEMO_HOSTS = [
   /(^|\.)3oaks\.com$/i,
   /(^|\.)pragmaticplay\.com$/i,
-  /(^|\.)pragmaticplay\.net$/i
+  /(^|\.)pragmaticplay\.net$/i,
+  /(^|\.)bgaming\.com$/i,
+  /(^|\.)belatragames\.com$/i
 ];
 
 function permittedTopLevel(url) {
@@ -152,6 +154,7 @@ async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, 
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
     await page.waitForTimeout(options.settleMs);
+    await bootstrapSupportedPage(page);
 
     const runtime = await findRuntime(page, options.timeoutMs);
     if (!runtime) throw new Error('No supported runtime found for purchase');
@@ -238,6 +241,7 @@ async function runOne(browser, url, actions, options, index, total) {
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
     await page.waitForTimeout(options.settleMs);
+    await bootstrapSupportedPage(page);
 
     const runtime = await findRuntime(page, options.timeoutMs);
     if (!runtime) throw new Error('No supported runtime found in page/frames');
