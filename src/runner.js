@@ -19,6 +19,44 @@ function permittedTopLevel(url) {
   catch { return false; }
 }
 
+async function runtimeDebug(page) {
+  const out = [];
+  for (const frame of page.frames()) {
+    let info = null;
+    try {
+      info = await frame.evaluate(() => {
+        const visible = el => {
+          try {
+            const r = el.getBoundingClientRect();
+            const s = getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+          } catch { return false; }
+        };
+
+        const controls = [...document.querySelectorAll('button,a,[role="button"],[tabindex]')]
+          .filter(visible)
+          .slice(0, 30)
+          .map(el => String(el.innerText || el.getAttribute('aria-label') || el.getAttribute('title') || '').trim().replace(/\s+/g, ' ').slice(0, 100))
+          .filter(Boolean);
+
+        return {
+          title: document.title,
+          canvas: document.querySelectorAll('canvas').length,
+          iframe: document.querySelectorAll('iframe').length,
+          svg: document.querySelectorAll('svg').length,
+          video: document.querySelectorAll('video').length,
+          controls,
+          bodyText: String(document.body?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 500)
+        };
+      });
+    } catch (error) {
+      info = { error: String(error?.message || error) };
+    }
+    out.push({ url: frame.url(), ...info });
+  }
+  return out;
+}
+
 export async function discoverCatalog(browser, catalogUrl, options) {
   if (!permittedTopLevel(catalogUrl)) throw new Error(`Catalog host is not allowed by demo-only mode: ${catalogUrl}`);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -244,7 +282,11 @@ async function runOne(browser, url, actions, options, index, total) {
     await bootstrapSupportedPage(page);
 
     const runtime = await findRuntime(page, options.timeoutMs);
-    if (!runtime) throw new Error('No supported runtime found in page/frames');
+    if (!runtime) {
+      result.runtimeDebug = await runtimeDebug(page);
+      console.log('  runtime-debug=' + JSON.stringify(result.runtimeDebug));
+      throw new Error('No supported runtime found in page/frames');
+    }
 
     const { provider, frame } = runtime;
     result.provider = provider.id;
