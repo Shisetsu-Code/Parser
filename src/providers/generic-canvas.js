@@ -13,9 +13,10 @@ export const genericCanvas = {
     if (!isGenericOfficialHost(host)) return { attempted: false };
 
     const candidates = [
-      page.getByRole('button', { name: /play demo|jugar demo|play free|jugar gratis/i }),
-      page.getByRole('link', { name: /play demo|jugar demo|play free|jugar gratis|play now|jugar ahora/i }),
-      page.locator('button, a').filter({ hasText: /play demo|jugar demo|play free|jugar gratis/i })
+      page.getByRole('button', { name: /play demo|jugar demo|play free|jugar gratis|play now|jugar ahora|start|jugar/i }),
+      page.getByRole('link', { name: /play demo|jugar demo|play free|jugar gratis|play now|jugar ahora|start|jugar/i }),
+      page.getByText(/play demo|jugar demo|play free|jugar gratis|play now|jugar ahora/i, { exact: false }),
+      page.locator('button, a, [role="button"]').filter({ hasText: /play|jugar|demo|start/i })
     ];
 
     for (const locator of candidates) {
@@ -23,7 +24,7 @@ export const genericCanvas = {
         const first = locator.first();
         if (await first.isVisible({ timeout: 700 })) {
           await first.click({ timeout: 2500 });
-          await page.waitForTimeout(1200);
+          await page.waitForTimeout(2500);
           return { attempted: true, clicked: true };
         }
       } catch {}
@@ -32,25 +33,16 @@ export const genericCanvas = {
     return { attempted: true, clicked: false };
   },
 
-  async detect(frame) {
+  async detect(frame, page) {
+    let topLevelOfficial = false;
+    try {
+      const host = new URL(page.url()).hostname;
+      topLevelOfficial = /(^|\.)(bgaming\.com|belatragames\.com)$/i.test(host);
+    } catch {}
+
+    if (!topLevelOfficial) return false;
+
     return frame.evaluate(() => {
-      const host = location.hostname;
-      const ancestors = (() => {
-        try { return Array.from(location.ancestorOrigins || []); } catch { return []; }
-      })();
-
-      const official =
-        /(^|\.)(bgaming\.com|belatragames\.com)$/i.test(host) ||
-        ancestors.some(origin => {
-          try {
-            return /(^|\.)(bgaming\.com|belatragames\.com)$/i.test(new URL(origin).hostname);
-          } catch {
-            return false;
-          }
-        });
-
-      if (!official) return false;
-
       const canvases = [...document.querySelectorAll('canvas')].filter(canvas => {
         const r = canvas.getBoundingClientRect();
         const s = getComputedStyle(canvas);
