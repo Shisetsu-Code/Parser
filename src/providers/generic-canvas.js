@@ -12,22 +12,105 @@ export const genericCanvas = {
     try { host = new URL(page.url()).hostname; } catch {}
     if (!isGenericOfficialHost(host)) return { attempted: false };
 
-    const candidates = [
-      page.getByRole('button', { name: /play demo|jugar demo|play free|jugar gratis|play now|jugar ahora|start|jugar/i }),
-      page.getByRole('link', { name: /play demo|jugar demo|play free|jugar gratis|play now|jugar ahora|start|jugar/i }),
-      page.getByText(/play demo|jugar demo|play free|jugar gratis|play now|jugar ahora/i, { exact: false }),
-      page.locator('button, a, [role="button"]').filter({ hasText: /play|jugar|demo|start/i })
+    const context = page.context();
+    const dismissPatterns = [
+      /accept all|accept cookies|aceptar todo|aceptar cookies|allow all/i,
+      /^ocultar$/i,
+      /^close$/i,
+      /^cerrar$/i
     ];
 
-    for (const locator of candidates) {
-      try {
-        const first = locator.first();
-        if (await first.isVisible({ timeout: 700 })) {
-          await first.click({ timeout: 2500 });
-          await page.waitForTimeout(2500);
-          return { attempted: true, clicked: true };
-        }
-      } catch {}
+    for (const pattern of dismissPatterns) {
+      const locators = [
+        page.getByRole('button', { name: pattern }),
+        page.getByRole('link', { name: pattern }),
+        page.getByText(pattern, { exact: true })
+      ];
+      for (const locator of locators) {
+        try {
+          const count = Math.min(await locator.count(), 8);
+          for (let i = 0; i < count; i++) {
+            const el = locator.nth(i);
+            if (await el.isVisible({ timeout: 150 }).catch(() => false)) {
+              await el.click({ timeout: 1200, force: true }).catch(() => {});
+              await page.waitForTimeout(250);
+              break;
+            }
+          }
+        } catch {}
+      }
+    }
+
+    const launchPatterns = /play demo|jugar demo|play free|jugar gratis|play now|jugar ahora|^on-line$|^online$|^start$|^jugar$/i;
+    const launchers = [
+      page.getByRole('button', { name: launchPatterns }),
+      page.getByRole('link', { name: launchPatterns }),
+      page.getByText(launchPatterns, { exact: true }),
+      page.locator('button,a,[role="button"]').filter({ hasText: launchPatterns })
+    ];
+
+    const pagesBefore = new Set(context.pages());
+
+    for (const locator of launchers) {
+      let count = 0;
+      try { count = Math.min(await locator.count(), 20); } catch {}
+      for (let i = 0; i < count; i++) {
+        const el = locator.nth(i);
+        let visible = false;
+        try { visible = await el.isVisible({ timeout: 200 }); } catch {}
+        if (!visible) continue;
+
+        try {
+          await el.scrollIntoViewIfNeeded({ timeout: 600 }).catch(() => {});
+          await el.click({ timeout: 2200, force: true });
+          await page.waitForTimeout(1800);
+
+          const newPages = context.pages().filter(p => !pagesBefore.has(p));
+          if (newPages.length) {
+            const popup = newPages[newPages.length - 1];
+            await popup.waitForLoadState('domcontentloaded', { timeout: 6000 }).catch(() => {});
+            const popupUrl = popup.url();
+            if (popupUrl && popupUrl !== 'about:blank') {
+              await page.goto(popupUrl, { waitUntil: 'domcontentloaded', timeout: 12_000 }).catch(() => {});
+              await page.waitForTimeout(1800);
+            }
+            await popup.close().catch(() => {});
+          }
+
+          // Some launchers lazy-load iframe src from data-src/data-url.
+          await page.evaluate(() => {
+            for (const iframe of document.querySelectorAll('iframe')) {
+              const current = iframe.getAttribute('src') || '';
+              if (current && current !== 'about:blank') continue;
+              const candidate =
+                iframe.getAttribute('data-src') ||
+                iframe.getAttribute('data-url') ||
+                iframe.dataset?.src ||
+                iframe.dataset?.url ||
+                '';
+              if (/^https?:\/\//i.test(candidate)) iframe.src = candidate;
+            }
+          }).catch(() => {});
+
+          await page.waitForTimeout(1800);
+          return { attempted: true, clicked: true, textIndex: i };
+        } catch {}
+      }
+    }
+
+    // Last-resort native click for custom wrappers that Playwright does not
+    // expose as a semantic button/link.
+    const native = await page.evaluate(() => {
+      const wanted = /^(play demo|jugar demo|play free|jugar gratis|play now|jugar ahora|on-line|online|start|jugar)$/i;
+      const nodes = [...document.querySelectorAll('button,a,[role="button"],div,span')];
+      const target = nodes.find(el => wanted.test(String(el.textContent || '').trim()));
+      if (!target) return false;
+      try { target.click(); return true; } catch { return false; }
+    }).catch(() => false);
+
+    if (native) {
+      await page.waitForTimeout(2500);
+      return { attempted: true, clicked: true, native: true };
     }
 
     return { attempted: true, clicked: false };
