@@ -138,3 +138,34 @@ Explicit purchase selection is available for diagnostics:
 For 3Oaks the adapter opens the provider buy-feature control and routes the selected option through `app.board.buyFeature.actBuyFeature(option)`. For Pragmatic it invokes the real `FeaturePurchaseOption.OnClick()` component when available, including the confirm option, and falls back to the provider's purchase manager only when the button component is unavailable.
 
 Purchase execution remains restricted to the official DEMO hosts allowed by the runner.
+
+
+## Inspect purchases visually
+
+By default each isolated purchase context closes when its capture is complete. To keep it open and verify the result visually, use:
+
+```bash
+npm start -- --pause-after-purchase
+```
+
+After every purchase the parser will print:
+
+```text
+Purchase window is paused. Press Enter to close it and continue...
+```
+
+The current browser window stays open until Enter is pressed.
+
+For an automatic delay instead:
+
+```bash
+npm start -- --hold-after-purchase 10000
+```
+
+This keeps each purchase window visible for 10 seconds.
+
+Every purchase also saves a screenshot automatically under:
+
+```text
+results/screenshots/
+```
