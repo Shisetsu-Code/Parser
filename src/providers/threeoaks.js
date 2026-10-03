@@ -27,6 +27,35 @@ export const threeOaks = {
     }).catch(() => false);
   },
 
+  async stateSnapshot(frame) {
+    return frame.evaluate(() => {
+      const read = fn => { try { return fn(); } catch { return null; } };
+      const view = window.GR?.UI?.view;
+      const popup = read(() => window.app?.buyFeature?._components?.buyFeaturePopup);
+      const flowGet = key => read(() => window.GR?.Flow?.get?.(key));
+
+      const primitive = value =>
+        value == null || ['string', 'number', 'boolean'].includes(typeof value) ? value : null;
+
+      return {
+        spinDisabled: read(() => typeof view?.spin?.disabled === 'function' ? view.spin.disabled() : view?.spin?.disabled),
+        spinState: primitive(read(() => typeof view?.spin?.state === 'function' ? view.spin.state() : view?.spin?.state)),
+        buyFeatureDisabled: read(() => typeof view?.buy_feature?.disabled === 'function' ? view.buy_feature.disabled() : view?.buy_feature?.disabled),
+        buyFeatureSelected: read(() => typeof view?.buy_feature?.selected === 'function' ? view.buy_feature.selected() : view?.buy_feature?.selected),
+        buyPopupVisible: primitive(read(() => popup?.visible ?? popup?.active ?? popup?.opened ?? popup?.isOpen)),
+        selectedMode: primitive(
+          read(() => window.app?.buyFeature?._selectedMode) ??
+          read(() => window.app?.buyFeature?.selectedMode) ??
+          read(() => window.app?.board?.buyFeature?._selectedMode) ??
+          read(() => window.app?.board?.buyFeature?.selectedMode)
+        ),
+        flowBuyBonus: primitive(flowGet('context.buy_bonus')),
+        flowGameStatus: primitive(flowGet('context.game_status')),
+        flowFeature: primitive(flowGet('context.feature'))
+      };
+    }).catch(() => null);
+  },
+
   async scan(frame) {
     return frame.evaluate(() => {
       const view = window.GR?.UI?.view;
