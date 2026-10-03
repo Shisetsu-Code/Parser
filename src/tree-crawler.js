@@ -148,11 +148,16 @@ function trafficSignature(requests) {
       endpoints.push(url);
     }
 
-    const actionish = method !== 'GET' || /gameService|gs2c|doSpin|doBonus/i.test(url);
+    const combined = body + ' ' + url;
+    const actionish =
+      /gameService|doSpin|doBonus/i.test(url) ||
+      /(?:^|[&?{,\s])(command|action|pur|purchased_feature|bet)[=:"']/i.test(body) ||
+      /(?:doSpin|doBonus|purchased_feature)/i.test(body);
+
     if (!actionish) continue;
     actionRequestCount++;
 
-    if (/doSpin|action.?[=:].?doSpin|command.?[=:].?(play|spin)/i.test(body + ' ' + url)) signals.add('spin');
+    if (/doSpin|action.?[=:].?doSpin|command.?[=:].?(play|spin)/i.test(combined)) signals.add('spin');
     if (/purchased_feature|(?:^|[&?{,\s])pur(?:chased)?[=:"']|command.?[=:"'].*purchase/i.test(body)) signals.add('purchase');
     if (/doBonus|command.?[=:"'].*bonus/i.test(body + ' ' + url)) signals.add('bonus');
     if (/(?:^|[&?{,\s])bet[=:"']/i.test(body)) signals.add('bet');
