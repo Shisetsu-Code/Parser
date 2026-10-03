@@ -254,11 +254,23 @@ async function runOne(browser, url, actions, options, index, total) {
         throw new Error(`Provider ${provider.id} does not implement control sweep`);
       }
 
+      const controlKey = control => JSON.stringify({
+        kind: control?.kind ?? null,
+        name: control?.name ?? null,
+        event: control?.event ?? null,
+        occurrence: control?.occurrence ?? 0,
+        purchaseIndex: control?.purchaseIndex ?? null,
+        optionIndex: control?.optionIndex ?? null,
+        type: control?.type ?? null,
+        active: control?.active ?? null
+      });
+
       const controls = await provider.listControls(frame);
+      const seenControls = new Set(controls.map(controlKey));
       console.log(`  sweep-controls=${controls.length}`);
       let sweepFrame = frame;
 
-      for (let controlIndex = 0; controlIndex < controls.length; controlIndex++) {
+      for (let controlIndex = 0; controlIndex < controls.length && controlIndex < 250; controlIndex++) {
         const control = controls[controlIndex];
         const before = network.length;
         const started = Date.now();
@@ -306,6 +318,21 @@ async function runOne(browser, url, actions, options, index, total) {
           }
           sweepFrame = recovered.frame;
         }
+
+        // Discover controls exposed by the action we just took (menus, buy-feature
+        // options, confirm buttons, etc.) and append only genuinely new states.
+        try {
+          const discovered = await provider.listControls(sweepFrame);
+          let added = 0;
+          for (const candidate of discovered) {
+            const key = controlKey(candidate);
+            if (seenControls.has(key)) continue;
+            seenControls.add(key);
+            controls.push(candidate);
+            added++;
+          }
+          if (added) console.log(`    discovered +${added} controls (queue=${controls.length})`);
+        } catch {}
       }
     }
 
