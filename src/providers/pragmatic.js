@@ -26,6 +26,7 @@ export const pragmatic = {
       const controls = [];
 
       if (window.XTButton) {
+        const seen = new Map();
         for (let ri = 0; ri < roots.length; ri++) {
           let buttons = [];
           try { buttons = roots[ri].GetComponentsInChildren(XTButton, true) || []; } catch {}
@@ -36,11 +37,15 @@ export const pragmatic = {
             try { event = b.eventToCode?.name ?? null; } catch {}
             try { name = b.gameObject?.name ?? null; } catch {}
             try { active = b.gameObject?.activeInHierarchy ?? null; } catch {}
+            const key = String(name || '') + '|' + String(event || '');
+            const occurrence = seen.get(key) || 0;
+            seen.set(key, occurrence + 1);
             controls.push({
               kind: 'XTButton',
               root: ri,
               name,
               event,
+              occurrence,
               active,
               canPress: typeof b.OnPress === 'function',
               canClick: typeof b.OnClick === 'function'
@@ -356,5 +361,80 @@ export const pragmatic = {
 
       return { ok: false, index, reason: 'No Pragmatic purchase option handler found' };
     }, { index });
+  },
+
+  async listControls(frame) {
+    const scan = await this.scan(frame);
+    return scan?.controls || [];
+  },
+
+  async pressControl(frame, control) {
+    return frame.evaluate(({ control }) => {
+      if (!window.globalRuntime || !window.XTButton) {
+        return { ok: false, reason: 'Pragmatic runtime unavailable' };
+      }
+
+      const roots = globalRuntime.sceneRoots || [];
+      const matches = [];
+      for (const root of roots) {
+        let buttons = [];
+        try { buttons = root.GetComponentsInChildren(XTButton, true) || []; } catch {}
+        for (const button of buttons) {
+          let name = null;
+          let event = null;
+          try { name = button.gameObject?.name ?? null; } catch {}
+          try { event = button.eventToCode?.name ?? null; } catch {}
+          if (String(name || '') === String(control?.name || '') &&
+              String(event || '') === String(control?.event || '')) {
+            matches.push(button);
+          }
+        }
+      }
+
+      const target = matches[Number(control?.occurrence || 0)] || matches[0];
+      if (!target) {
+        return {
+          ok: false,
+          reason: 'Pragmatic control unavailable',
+          control: control?.name ?? null,
+          event: control?.event ?? null
+        };
+      }
+
+      try {
+        if (typeof target.OnPress === 'function') {
+          target.OnPress(true);
+          target.OnPress(false);
+          return {
+            ok: true,
+            control: control?.name ?? null,
+            event: control?.event ?? null,
+            strategy: 'XTButton.OnPress(true/false)'
+          };
+        }
+        if (typeof target.OnClick === 'function') {
+          target.OnClick();
+          return {
+            ok: true,
+            control: control?.name ?? null,
+            event: control?.event ?? null,
+            strategy: 'XTButton.OnClick()'
+          };
+        }
+        return {
+          ok: false,
+          control: control?.name ?? null,
+          event: control?.event ?? null,
+          reason: 'No invokable XTButton path'
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          control: control?.name ?? null,
+          event: control?.event ?? null,
+          reason: String(error?.message || error)
+        };
+      }
+    }, { control });
   }
 };
