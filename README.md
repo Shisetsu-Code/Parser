@@ -189,3 +189,38 @@ Each result contains `sweep[]` entries with:
 - post-hoc traffic signals such as `spin`, `purchase`, `bonus`, and `bet`.
 
 If a button destroys or leaves the game runtime, the runner reloads the same DEMO game and resumes with the next control.
+
+
+## Replay tree crawler
+
+Use `tree_all` when one control reveals several second-level choices such as multiple feature purchases.
+
+```text
+https://3oaks.com/game/3_aztec_temples | tree_all
+https://www.pragmaticplay.com/en/games/sweet-craze/?gamelang=en&cur=USD | tree_all
+```
+
+The crawler treats the UI as a state tree. Every branch is tested in a fresh DEMO browser context:
+
+```text
+root
+└─ BUY FEATURE
+   ├─ option 1
+   │  └─ confirm
+   ├─ option 2
+   │  └─ confirm
+   └─ option 3
+      └─ confirm
+```
+
+To explore a branch, Parser reloads the game, replays the exact path from the root, performs one new control action, captures only the traffic caused by that action, fingerprints the resulting control state, and queues unseen states.
+
+Results are stored under `tree.states` and `tree.edges`. Each edge includes the replayable control descriptor, isolated network delta, traffic signals, child-state hash, and terminal status.
+
+Useful limits:
+
+```bash
+node src/index.js --tree-max-depth 4 --tree-max-states 60 --tree-max-edges 200 --tree-max-controls 120
+```
+
+State hashes deduplicate equivalent screens, so two different paths that reach the same runtime control state are only expanded once.
