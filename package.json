@@ -8,7 +8,8 @@
     "start": "node src/index.js",
     "check": "node --check src/index.js && node --check src/runner.js && node --check src/providers/threeoaks.js && node --check src/providers/pragmatic.js",
     "start:pause": "node src/index.js --pause-after-purchase",
-    "start:hold15": "node src/index.js --hold-after-purchase 15000"
+    "start:hold15": "node src/index.js --hold-after-purchase 15000",
+    "live:smoke": "node scripts/live-smoke.mjs"
   },
   "dependencies": {
     "playwright": "^1.55.0"
