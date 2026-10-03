@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { findRuntime } from './providers/index.js';
+import { bootstrapSupportedPage, findRuntime } from './providers/index.js';
 import { summarizeRequest } from './lib/common.js';
 
 function replayDescriptor(control) {
@@ -377,6 +377,7 @@ async function openAtPath(browser, url, expectedProvider, path, options) {
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
     await page.waitForTimeout(options.settleMs);
+    await bootstrapSupportedPage(page);
 
     let runtime = await reacquire(page, expectedProvider, options.timeoutMs);
     if (!runtime) throw new Error('Tree replay: provider runtime not found');
