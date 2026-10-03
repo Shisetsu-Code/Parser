@@ -1,4 +1,4 @@
-name: Sweet Craze tree check
+name: Untested 4 Fairy Flowers tree
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,13 +19,13 @@ jobs:
           node-version: "24"
       - run: npm install
       - run: npx playwright install --with-deps chromium
-      - name: Run Sweet Craze tree
+      - name: Run 4 Fairy Flowers tree
         shell: bash
         run: |
-          printf '%s\n' 'https://www.pragmaticplay.com/en/games/sweet-craze/?gamelang=en&cur=USD | tree_all' > sweet-target.txt
-          node src/index.js --headless --targets sweet-target.txt --timeout 40000 --settle 1800 --action-wait 500 --tree-max-depth 4 --tree-max-states 8 --tree-max-edges 20 --tree-max-controls 6
-      - name: Show purchase traffic
+          printf '%s\n' 'https://3oaks.com/game/4_fairy_flowers | tree_all' > target.txt
+          node src/index.js --headless --targets target.txt --timeout 40000 --settle 1800 --action-wait 500 --tree-max-depth 4 --tree-max-states 10 --tree-max-edges 28 --tree-max-controls 8
+      - name: Show traffic/tree
         if: always()
         shell: bash
         run: |
-          grep -R -E '"name": "O_[01]"|"name": "ConfirmBuy"|"name": "StartSpin_Button"|PurchaseFeature|pendingPurchaseIndex|featurePurchaseIndex|pur=|purchased_feature' results || true
+          grep -R -E 'tree state=|tree edge=|tree done|signals=|replayFailures|purchased_feature|doSpin|doBonus|purchase|bonus' results || true
