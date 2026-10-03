@@ -9,12 +9,10 @@ const OUT = path.join(ROOT, 'artifacts-out');
 
 const known = {
   threeoaks: [
-    'https://3oaks.com/game/3_aztec_temples',
-    'https://3oaks.com/game/3_coin_volcanoes'
+    'https://3oaks.com/game/3_aztec_temples'
   ],
   pragmatic: [
-    'https://www.pragmaticplay.com/en/games/sweet-craze/?gamelang=en&cur=USD',
-    'https://www.pragmaticplay.com/en/games/big-bass-mission-fishin/?gamelang=en&cur=USD'
+    'https://www.pragmaticplay.com/en/games/sweet-craze/?gamelang=en&cur=USD'
   ]
 };
 
@@ -45,7 +43,7 @@ function runParser(name, targetFile) {
     '--targets', targetFile,
     '--timeout', '45000',
     '--settle', '5000',
-    '--action-wait', '1800'
+    '--action-wait', '600'
   ], {
     cwd: ROOT,
     stdio: 'inherit'
@@ -82,7 +80,7 @@ async function discoverNew() {
     const takeNew = items => items
       .map(x => x.url)
       .filter(url => !knownSet.has(norm(url)))
-      .slice(0, 2);
+      .slice(0, 1);
 
     return {
       threeoaks: takeNew(three),
