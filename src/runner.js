@@ -3,6 +3,7 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { chromium } from 'playwright';
 import { findRuntime } from './providers/index.js';
+import { runTreeCrawler } from './tree-crawler.js';
 import { ensureDir, safeName, sleep, summarizeRequest, writeJson } from './lib/common.js';
 
 const DEMO_HOSTS = [
@@ -75,6 +76,10 @@ function isBuyAllAction(action) {
 
 function isSweepAction(action) {
   return ['sweep', 'sweep_all', 'fuzz', 'fuzz_all'].includes(String(action || '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
+}
+
+function isTreeAction(action) {
+  return ['tree', 'tree_all', 'crawl', 'crawl_tree', 'tree_crawl'].includes(String(action || '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
 }
 
 function trafficSignature(requests) {
@@ -209,6 +214,7 @@ async function runOne(browser, url, actions, options, index, total) {
     purchaseOptions: [],
     purchases: [],
     sweep: [],
+    tree: null,
     requests: [],
     error: null
   };
@@ -247,6 +253,25 @@ async function runOne(browser, url, actions, options, index, total) {
     result.scan = await provider.scan(frame);
     console.log(`  provider=${provider.id} frame=${frame.url()}`);
     console.log(`  controls=${result.scan?.controls?.length ?? 0}`);
+
+    const treeAll = actions.some(isTreeAction);
+    if (treeAll) {
+      if (typeof provider.listControls !== 'function' || typeof provider.pressControl !== 'function') {
+        throw new Error(`Provider ${provider.id} does not implement control tree crawling`);
+      }
+
+      console.log(
+        `  tree-crawl depth=${options.treeMaxDepth} states=${options.treeMaxStates} ` +
+        `edges=${options.treeMaxEdges} controls/state=${options.treeMaxControls}`
+      );
+
+      result.tree = await runTreeCrawler(browser, url, provider.id, options);
+
+      console.log(
+        `  tree done states=${result.tree.stats.states} edges=${result.tree.stats.edges} ` +
+        `interesting=${result.tree.stats.interesting} replayFailures=${result.tree.stats.replayFailures}`
+      );
+    }
 
     const sweepAll = actions.some(isSweepAction);
     if (sweepAll) {
@@ -367,7 +392,7 @@ async function runOne(browser, url, actions, options, index, total) {
       }
     }
 
-    for (const action of actions.filter(action => !isBuyAllAction(action) && !isSweepAction(action))) {
+    for (const action of actions.filter(action => !isBuyAllAction(action) && !isSweepAction(action) && !isTreeAction(action))) {
       const before = network.length;
       const started = Date.now();
       const press = await provider.press(frame, action);
