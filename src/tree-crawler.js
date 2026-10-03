@@ -81,13 +81,25 @@ function snapshotHasPendingPurchase(snapshot) {
 }
 
 function isSpinControl(control) {
-  const text = [
-    control?.kind,
-    control?.name,
-    control?.event,
-    control?.method
-  ].filter(Boolean).join(' ').toLowerCase();
-  return /(spin|play)/i.test(text) && !/(stopspin|stop_spin)/i.test(text);
+  const name = String(control?.name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const event = String(control?.event || '').toLowerCase();
+
+  if (/evt_datatocode_pressed_spin(?:$|_)/i.test(event)) return true;
+
+  return new Set([
+    'spin',
+    'spin_button',
+    'startspin_button',
+    'start_spin_button',
+    'play',
+    'play_button',
+    'startplay_button',
+    'start_play_button'
+  ]).has(name);
 }
 
 function isFeatureishControl(control) {
@@ -287,7 +299,7 @@ async function settleAutomaticActivity(page, network, expectedProvider, options,
 
   const started = Date.now();
   let lastActivityAt = Date.now();
-  let lastNetworkCount = network.length;
+  let lastActionRequestCount = trafficSignature(network).actionRequestCount;
   let current = initialState;
   let lastSignature = current?.signature ?? null;
   const transitions = [];
@@ -309,19 +321,20 @@ async function settleAutomaticActivity(page, network, expectedProvider, options,
     }
 
     const next = await captureRuntimeState(runtime);
-    const networkChanged = network.length !== lastNetworkCount;
+    const actionRequestCount = trafficSignature(network).actionRequestCount;
+    const networkChanged = actionRequestCount !== lastActionRequestCount;
     const stateChanged = next.signature !== lastSignature;
 
     if (networkChanged || stateChanged) {
       transitions.push({
         atMs: Date.now() - started,
-        networkCount: network.length,
+        actionRequestCount,
         signature: next.signature,
         networkChanged,
         stateChanged
       });
       lastActivityAt = Date.now();
-      lastNetworkCount = network.length;
+      lastActionRequestCount = actionRequestCount;
       lastSignature = next.signature;
       current = next;
     } else if (!current) {
