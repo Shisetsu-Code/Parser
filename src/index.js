@@ -24,6 +24,8 @@ Options:
   --timeout MS          navigation/runtime timeout (default: 30000)
   --settle MS           wait after navigation (default: 2000)
   --action-wait MS      wait after each press (default: 1200)
+  --pause-after-purchase wait for Enter before closing each purchase window
+  --hold-after-purchase MS keep each purchase window open for N milliseconds
 `;
 
 async function main() {
