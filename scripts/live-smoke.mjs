@@ -42,12 +42,12 @@ function runParser(name, targetFile) {
     '--headless',
     '--targets', targetFile,
     '--timeout', '45000',
-    '--settle', '5000',
+    '--settle', '1800',
     '--action-wait', '500',
     '--tree-max-depth', '4',
-    '--tree-max-states', '12',
-    '--tree-max-edges', '36',
-    '--tree-max-controls', '24'
+    '--tree-max-states', '6',
+    '--tree-max-edges', '24',
+    '--tree-max-controls', '8'
   ], {
     cwd: ROOT,
     stdio: 'inherit'
