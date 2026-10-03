@@ -47,9 +47,9 @@ function controlPriority(control) {
 
   let score = 0;
   if (control?.active === true) score += 100;
-  if (/(purchase|buy|feature|confirm|rebuy|o_\d|button\d)/i.test(text)) score += 90;
-  if (/(intro|continue|start|close|ok)/i.test(text)) score += 45;
-  if (/(spin|play)/i.test(text)) score += 30;
+  if (/(purchase|buy|feature|confirm|rebuy|o_\d|button\d)/i.test(text)) score += 300;
+  if (/(intro|continue|start|close|ok)/i.test(text)) score += 160;
+  if (/(spin|play)/i.test(text)) score += 40;
   if (control?.active === false) score -= 15;
   return score;
 }
