@@ -67,6 +67,71 @@ export async function run(options, initialTargets) {
   return results;
 }
 
+function isBuyAllAction(action) {
+  return ['buy_all', 'purchase_all'].includes(String(action || '').trim().toLowerCase().replace(/[\s-]+/g, '_'));
+}
+
+function hasGameplayRequest(requests) {
+  return requests.some(req => {
+    const hay = String(req?.url || '') + ' ' + String(req?.postData || '');
+    return /gameService|gs2c|doSpin|command.?[=:].?(play|spin)|action.?[=:].?doSpin|purchased_feature|\bpur\b/i.test(hay);
+  });
+}
+
+async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, options) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  const network = [];
+  page.on('request', req => {
+    const u = req.url();
+    if (/gameService|doSpin|doBonus|gs2c|spin|bonus|feature|purchase/i.test(u) || req.method() !== 'GET') {
+      network.push(summarizeRequest(req));
+    }
+  });
+
+  const result = {
+    option: purchaseOption,
+    provider: null,
+    press: null,
+    spinFallback: null,
+    network: [],
+    error: null
+  };
+
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
+    await page.waitForTimeout(options.settleMs);
+
+    const runtime = await findRuntime(page, options.timeoutMs);
+    if (!runtime) throw new Error('No supported runtime found for purchase');
+    const { provider, frame } = runtime;
+    result.provider = provider.id;
+    if (provider.id !== expectedProvider) throw new Error('Provider changed during purchase reload');
+
+    const frameDemo = await provider.isDemo(frame);
+    if (!(frameDemo || permittedTopLevel(url))) throw new Error('Purchase blocked: DEMO mode not verified');
+    if (typeof provider.purchase !== 'function') throw new Error('Provider does not implement purchase()');
+
+    const before = network.length;
+    result.press = await provider.purchase(frame, purchaseOption.index);
+    await page.waitForTimeout(Math.max(options.actionWaitMs, 1200));
+
+    let delta = network.slice(before);
+    if (result.press?.ok && result.press?.needsSpin && !hasGameplayRequest(delta)) {
+      result.spinFallback = await provider.press(frame, 'spin');
+      await page.waitForTimeout(Math.max(options.actionWaitMs, 1200));
+      delta = network.slice(before);
+    }
+
+    result.network = delta;
+  } catch (error) {
+    result.error = String(error?.stack || error?.message || error);
+  } finally {
+    await context.close();
+  }
+  return result;
+}
+
 async function runOne(browser, url, actions, options, index, total) {
   const result = {
     url,
@@ -78,6 +143,8 @@ async function runOne(browser, url, actions, options, index, total) {
     demo: false,
     scan: null,
     actions: [],
+    purchaseOptions: [],
+    purchases: [],
     requests: [],
     error: null
   };
@@ -117,7 +184,32 @@ async function runOne(browser, url, actions, options, index, total) {
     console.log(`  provider=${provider.id} frame=${frame.url()}`);
     console.log(`  controls=${result.scan?.controls?.length ?? 0}`);
 
-    for (const action of actions) {
+    const buyAll = actions.some(isBuyAllAction);
+    if (buyAll) {
+      if (typeof provider.listPurchases !== 'function' || typeof provider.purchase !== 'function') {
+        throw new Error(`Provider ${provider.id} does not implement purchase discovery/execution`);
+      }
+
+      result.purchaseOptions = await provider.listPurchases(frame);
+      console.log(`  purchase-options=${result.purchaseOptions.length}`);
+
+      for (const purchaseOption of result.purchaseOptions) {
+        if (purchaseOption.available === false) {
+          result.purchases.push({
+            option: purchaseOption,
+            skipped: true,
+            reason: 'option reported unavailable'
+          });
+          continue;
+        }
+        console.log(`  buying option ${purchaseOption.ordinal ?? purchaseOption.index}`);
+        const purchaseResult = await runPurchaseFresh(browser, url, provider.id, purchaseOption, options);
+        result.purchases.push(purchaseResult);
+        console.log(`    ok=${Boolean(purchaseResult.press?.ok)} requests=${purchaseResult.network?.length ?? 0} error=${purchaseResult.error ?? '-'}`);
+      }
+    }
+
+    for (const action of actions.filter(action => !isBuyAllAction(action))) {
       const before = network.length;
       const started = Date.now();
       const press = await provider.press(frame, action);
