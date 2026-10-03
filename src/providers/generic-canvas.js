@@ -141,7 +141,7 @@ export const genericCanvas = {
     let topLevelOfficial = false;
     try {
       const host = new URL(page.url()).hostname;
-      topLevelOfficial = /(^|\.)(bgaming\.com|belatragames\.com)$/i.test(host);
+      topLevelOfficial = /(^|\.)(bgaming\.com|belatragames\.com|bgaming-network\.com|bltrm\.com)$/i.test(host);
     } catch {}
 
     if (!topLevelOfficial) return false;
