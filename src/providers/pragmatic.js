@@ -102,6 +102,8 @@ export const pragmatic = {
 
   async press(frame, action) {
     const normalized = normalizeAction(action);
+    const buyMatch = normalized.match(/^(?:buy|purchase)_(\\d+)$/);
+    if (buyMatch) return this.purchase(frame, Number(buyMatch[1]) - 1);
     return frame.evaluate(({ normalized, eventMap }) => {
       if (!window.globalRuntime || !window.XT || !window.Vars) return { ok: false, reason: 'Pragmatic runtime unavailable' };
       const roots = globalRuntime.sceneRoots || [];
