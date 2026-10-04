@@ -19,6 +19,37 @@ export const pragmatic = {
     return frame.evaluate(() => /demogamesfree\.pragmaticplay\.net$/i.test(location.hostname) || /demo/i.test(location.href)).catch(() => false);
   },
 
+  async waitReady(frame, timeoutMs = 10_000) {
+    const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 10_000);
+    let last = null;
+
+    while (Date.now() < deadline) {
+      last = await frame.evaluate(() => {
+        const read = fn => { try { return fn(); } catch { return null; } };
+        return {
+          purInitReady: globalThis.__parserPragmaticPurInit != null,
+          canSpin: read(() => window.Vars?.CanSpin ? XT.GetBool(Vars.CanSpin) : null),
+          featurePurchaseOpen: read(() =>
+            window.Vars?.FeaturePurchaseWindowIsOpen
+              ? XT.GetBool(Vars.FeaturePurchaseWindowIsOpen)
+              : null
+          )
+        };
+      }).catch(() => null);
+
+      if (
+        last?.purInitReady === true &&
+        last?.canSpin !== false
+      ) {
+        return { ok: true, ...last };
+      }
+
+      await frame.page().waitForTimeout(180);
+    }
+
+    return { ok: false, ...(last || {}), reason: 'Pragmatic base state not ready' };
+  },
+
   async stateSnapshot(frame) {
     return frame.evaluate(() => {
       if (!window.XT || !window.Vars) return null;
@@ -162,6 +193,12 @@ export const pragmatic = {
         try {
           const name = button.gameObject?.name ?? null;
           const event = button.eventToCode?.name ?? null;
+          const preferClick = normalized === 'spin' || /spin/i.test(String(name || '') + ' ' + String(event || ''));
+
+          if (preferClick && typeof button.OnClick === 'function') {
+            button.OnClick();
+            return { ok: true, control: name, event, strategy: 'XTButton.OnClick()' };
+          }
           if (typeof button.OnPress === 'function') {
             button.OnPress(true);
             button.OnPress(false);
@@ -196,6 +233,7 @@ export const pragmatic = {
   },
 
   async listPurchases(frame) {
+    await this.waitReady(frame, 10_000).catch(() => null);
     const collect = async () => frame.evaluate(() => {
       if (!window.globalRuntime) return { options: [], pending: false, hasPurchaseRuntime: false, server: globalThis.__parserPragmaticPurInit ?? null };
       const roots = globalRuntime.sceneRoots || [];
@@ -420,6 +458,7 @@ export const pragmatic = {
   },
 
   async purchase(frame, index) {
+    await this.waitReady(frame, 10_000).catch(() => null);
     return frame.evaluate(async ({ index }) => {
       if (!window.globalRuntime || !window.XT || !window.Vars) return { ok: false, reason: 'Pragmatic runtime unavailable', index };
       const roots = globalRuntime.sceneRoots || [];
@@ -712,6 +751,18 @@ export const pragmatic = {
 
       const invoke = target => {
         if (!target) return { ok: false, reason: 'target unavailable' };
+        let spinLike = false;
+        try {
+          spinLike = /spin/i.test(
+            String(target.gameObject?.name || '') + ' ' +
+            String(target.eventToCode?.name || '')
+          );
+        } catch {}
+
+        if (spinLike && typeof target.OnClick === 'function') {
+          target.OnClick();
+          return { ok: true, strategy: 'OnClick()' };
+        }
         if (typeof target.OnPress === 'function') {
           target.OnPress(true);
           target.OnPress(false);
