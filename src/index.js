@@ -33,6 +33,7 @@ Options:
   --tree-auto-wait MS  maximum passive wait after an active transition (default: 8000)
   --tree-quiet MS      quiet window used to declare automatic activity settled (default: 900)
   --tree-repeat-limit N maximum repeated spin/play continuations in a feature path (default: 20)
+  --reuse-context       reuse one browser context/page across targets and tree replays
 `;
 
 async function main() {
