@@ -13,7 +13,8 @@
     "belatra:sequential": "node scripts/belatra-sequential-smoke.mjs",
     "pragmatic:audit20": "node scripts/pragmatic-purchase-audit.mjs",
     "pragmatic:audit-more20": "node scripts/pragmatic-purchase-audit-more20.mjs",
-    "pragmatic:feature-audit": "node scripts/pragmatic-feature-audit.mjs"
+    "pragmatic:feature-audit": "node scripts/pragmatic-feature-audit.mjs",
+    "pragmatic:spin-diagnostic": "node scripts/pragmatic-spin-diagnostic.mjs"
   },
   "dependencies": {
     "playwright": "^1.55.0"
