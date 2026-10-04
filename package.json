@@ -11,7 +11,8 @@
     "start:hold15": "node src/index.js --hold-after-purchase 15000",
     "live:smoke": "node scripts/live-smoke.mjs",
     "belatra:sequential": "node scripts/belatra-sequential-smoke.mjs",
-    "pragmatic:audit20": "node scripts/pragmatic-purchase-audit.mjs"
+    "pragmatic:audit20": "node scripts/pragmatic-purchase-audit.mjs",
+    "pragmatic:audit-more20": "node scripts/pragmatic-purchase-audit-more20.mjs"
   },
   "dependencies": {
     "playwright": "^1.55.0"
