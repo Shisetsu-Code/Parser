@@ -22,10 +22,52 @@ export const pragmatic = {
   async waitReady(frame, timeoutMs = 10_000) {
     const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 10_000);
     let last = null;
+    const actions = [];
 
     while (Date.now() < deadline) {
       last = await frame.evaluate(() => {
         const read = fn => { try { return fn(); } catch { return null; } };
+        const roots = globalThis.globalRuntime?.sceneRoots || [];
+        const safeControls = [];
+
+        if (globalThis.XTButton) {
+          for (let ri = 0; ri < roots.length; ri++) {
+            let buttons = [];
+            try { buttons = roots[ri].GetComponentsInChildren(XTButton, true) || []; } catch {}
+            for (let bi = 0; bi < buttons.length; bi++) {
+              const button = buttons[bi];
+              try {
+                if (button.gameObject?.activeInHierarchy === false) continue;
+                const name = String(button.gameObject?.name || '');
+                const event = String(button.eventToCode?.name || '');
+                const text = (name + ' ' + event).toLowerCase();
+
+                const normalSpin =
+                  /evt_datatocode_pressed_spin/i.test(event) ||
+                  /(?:^|_)spin(?:_|$)/i.test(name) && /pressed_spin/i.test(event);
+
+                if (normalSpin) continue;
+
+                const safe =
+                  /intro.*close|close.*intro|introclosepressed/i.test(text) ||
+                  /(?:^|_)(continue|ok|start)(?:_|$)/i.test(name) ||
+                  /continuepressed|pressed_continue|confirmintro|intro.*start/i.test(event);
+
+                if (!safe) continue;
+
+                safeControls.push({
+                  root:ri,
+                  index:bi,
+                  name,
+                  event,
+                  canPress:typeof button.OnPress === 'function',
+                  canClick:typeof button.OnClick === 'function'
+                });
+              } catch {}
+            }
+          }
+        }
+
         return {
           purInitReady: globalThis.__parserPragmaticPurInit != null,
           canSpin: read(() => window.Vars?.CanSpin ? XT.GetBool(Vars.CanSpin) : null),
@@ -33,21 +75,78 @@ export const pragmatic = {
             window.Vars?.FeaturePurchaseWindowIsOpen
               ? XT.GetBool(Vars.FeaturePurchaseWindowIsOpen)
               : null
-          )
+          ),
+          safeControls
         };
       }).catch(() => null);
 
       if (
         last?.purInitReady === true &&
-        last?.canSpin !== false
+        last?.canSpin === true
       ) {
-        return { ok: true, ...last };
+        return { ok: true, ...last, actions };
+      }
+
+      if (last?.canSpin === false && Array.isArray(last?.safeControls) && last.safeControls.length) {
+        const chosen = last.safeControls[0];
+        const pressed = await frame.evaluate(({ chosen }) => {
+          try {
+            const roots = globalThis.globalRuntime?.sceneRoots || [];
+            if (!globalThis.XTButton) return { ok:false, reason:'XTButton unavailable' };
+
+            const root = roots[Number(chosen.root)];
+            if (!root) return { ok:false, reason:'root unavailable' };
+
+            const buttons = root.GetComponentsInChildren(XTButton, true) || [];
+            const candidates = buttons.filter(button => {
+              try {
+                if (button.gameObject?.activeInHierarchy === false) return false;
+                return (
+                  String(button.gameObject?.name || '') === String(chosen.name || '') &&
+                  String(button.eventToCode?.name || '') === String(chosen.event || '')
+                );
+              } catch {
+                return false;
+              }
+            });
+
+            const button = candidates[0];
+            if (!button) return { ok:false, reason:'safe control disappeared' };
+
+            if (typeof button.OnPress === 'function') {
+              button.OnPress(true);
+              button.OnPress(false);
+              return { ok:true, strategy:'OnPress(true/false)', name:chosen.name, event:chosen.event };
+            }
+            if (typeof button.OnClick === 'function') {
+              button.OnClick();
+              return { ok:true, strategy:'OnClick()', name:chosen.name, event:chosen.event };
+            }
+            return { ok:false, reason:'safe control not invokable' };
+          } catch (error) {
+            return { ok:false, reason:String(error?.message || error) };
+          }
+        }, { chosen }).catch(error => ({ ok:false, reason:String(error?.message || error) }));
+
+        actions.push({
+          at: Date.now(),
+          control: chosen,
+          press: pressed
+        });
+
+        await frame.page().waitForTimeout(450);
+        continue;
       }
 
       await frame.page().waitForTimeout(180);
     }
 
-    return { ok: false, ...(last || {}), reason: 'Pragmatic base state not ready' };
+    return {
+      ok: false,
+      ...(last || {}),
+      actions,
+      reason: 'Pragmatic base state not ready'
+    };
   },
 
   async stateSnapshot(frame) {
@@ -458,7 +557,20 @@ export const pragmatic = {
   },
 
   async purchase(frame, index) {
-    await this.waitReady(frame, 10_000).catch(() => null);
+    const ready = await this.waitReady(frame, 10_000).catch(error => ({
+      ok:false,
+      reason:String(error?.message || error)
+    }));
+
+    if (!ready?.ok) {
+      return {
+        ok:false,
+        index,
+        reason:'Pragmatic base state not ready before purchase',
+        ready
+      };
+    }
+
     return frame.evaluate(async ({ index }) => {
       if (!window.globalRuntime || !window.XT || !window.Vars) return { ok: false, reason: 'Pragmatic runtime unavailable', index };
       const roots = globalRuntime.sceneRoots || [];
