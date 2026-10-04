@@ -462,22 +462,43 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
           .map(item => item?.payload?.q || item?.payload?.action || item?.payload?.command || null)
           .filter(Boolean);
 
+        const protocolSignals = new Set();
+        if (provider.id === 'belatra') {
+          for (const name of protocolNames.map(value => String(value).toLowerCase())) {
+            if (name === 'start' || name === 'play') protocolSignals.add('spin');
+            else if (name === 'saveplayerchoice') protocolSignals.add('pick');
+            else if (name === 'finish') protocolSignals.add('finish');
+            else if (/buy|purchase/.test(name)) protocolSignals.add('purchase');
+          }
+        }
+
+        const combinedSignals = [...new Set([...signature.signals, ...protocolSignals])];
+
         result.sweep.push({
           index: controlIndex,
           control,
           press,
           elapsedMs: Date.now() - started,
-          traffic: signature,
+          traffic: { ...signature, signals: combinedSignals },
           protocol,
           network: delta
         });
 
+        const failureDetail =
+          press?.ok === false
+            ? ` reason=${press?.reason ?? '-'}` +
+              (Array.isArray(press?.availableLineControls)
+                ? ` lineControls=${press.availableLineControls.slice(0, 12).join(',') || '-'}`
+                : '')
+            : '';
+
         console.log(
           `  sweep[${controlIndex + 1}/${controls.length}] ${control.name ?? '?'} ` +
-          `event=${control.event ?? '-'} ok=${Boolean(press?.ok)} ` +
+          `event=${control.event ?? '-'} ok=${Boolean(press?.ok)}` +
+          failureDetail + ' ' +
           `requests=${signature.requestCount} protocol=${protocol.length} ` +
           `q=${[...new Set(protocolNames)].join(',') || '-'} ` +
-          `signals=${signature.signals.join(',') || '-'}`
+          `signals=${combinedSignals.join(',') || '-'}`
         );
 
         // If a control navigated away, destroyed the frame or left the game runtime,
