@@ -206,7 +206,10 @@ function trafficSignature(requests) {
     actionRequestCount++;
 
     if (/doSpin|action.?[=:].?doSpin|command.?[=:].?(play|spin)/i.test(combined)) signals.add('spin');
-    if (/purchased_feature|(?:^|[&?{,\s])pur(?:chased)?[=:"']|command.?[=:"'].*purchase/i.test(body)) signals.add('purchase');
+    if (
+      /purchased_feature|(?:^|[&?{,\s])pur(?:chased)?[=:"']|command.?[=:"'].*purchase/i.test(body) ||
+      /(?:ante(?:_?bet)?|bonus_?chance|double_?chance|feature_?bet|extra_?bet|booster|super_?spin|enhanced_?spin)[=:"'&?]/i.test(body + ' ' + url)
+    ) signals.add('purchase');
     if (/doBonus|command.?[=:"'].*bonus/i.test(body + ' ' + url)) signals.add('bonus');
     if (/(?:^|[&?{,\s])bet[=:"']/i.test(body)) signals.add('bet');
   }
