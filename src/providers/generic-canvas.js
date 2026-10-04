@@ -12,15 +12,66 @@ export const genericCanvas = {
     try { host = new URL(page.url()).hostname; } catch {}
     if (!isGenericOfficialHost(host)) return { attempted: false };
 
-    // Official provider pages expose the real demo endpoint in data attributes.
-    // Prefer that stable URL over site overlays, modals or headless-sensitive JS.
+    // Belatra must stay embedded in the official provider page.
+    // Promoting demo.bltrm.com to a top-level navigation triggers Cloudflare
+    // challenges repeatedly even when the same browser context is reused.
+    if (/(^|\.)belatragames\.com$/i.test(host)) {
+      try {
+        const embedded = await page.evaluate(() => {
+          const frames = [...document.querySelectorAll('iframe')];
+          let target = frames.find(frame =>
+            /(^|\.)bltrm\.com/i.test((() => {
+              try {
+                const value =
+                  frame.getAttribute('src') ||
+                  frame.getAttribute('data-src') ||
+                  frame.getAttribute('data-url') ||
+                  frame.dataset?.src ||
+                  frame.dataset?.url ||
+                  '';
+                return new URL(value, location.href).hostname;
+              } catch {
+                return '';
+              }
+            })())
+          );
+
+          if (!target) return null;
+
+          const current = target.getAttribute('src') || '';
+          const candidate =
+            current ||
+            target.getAttribute('data-src') ||
+            target.getAttribute('data-url') ||
+            target.dataset?.src ||
+            target.dataset?.url ||
+            '';
+
+          if ((!current || current === 'about:blank') && /^https?:\/\//i.test(candidate)) {
+            target.src = candidate;
+          }
+
+          return candidate || null;
+        });
+
+        if (embedded) {
+          await page.waitForTimeout(2200);
+          return { attempted: true, embedded: true, url: embedded };
+        }
+      } catch {}
+
+      // Do not click generic launchers or navigate directly for Belatra.
+      // The official page is responsible for creating/refreshing its single demo iframe.
+      return { attempted: true, embedded: false };
+    }
+
+    // BGaming provider pages expose the real demo endpoint in data attributes.
+    // Direct navigation is useful there and does not share Belatra's iframe-only constraint.
     try {
       const directDemo = await page.evaluate(() => {
         const candidates = [
           document.querySelector('[data-iframe-src*="bgaming-network.com"]')?.getAttribute('data-iframe-src'),
-          document.querySelector('[data-copy*="bgaming-network.com"]')?.getAttribute('data-copy'),
-          document.querySelector('iframe.game-frame[data-src]')?.getAttribute('data-src'),
-          document.querySelector('iframe.game-frame[src]')?.getAttribute('src')
+          document.querySelector('[data-copy*="bgaming-network.com"]')?.getAttribute('data-copy')
         ].filter(Boolean);
         return candidates.find(value => /^https?:\/\//i.test(value)) || null;
       });
