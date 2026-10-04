@@ -834,6 +834,53 @@ export const pragmatic = {
         };
       }
 
+      const bonusFields = state?.bonusObjects?.BonusData?.fields || {};
+      const currentBonusRespin = Number(bonusFields.currentBonusRespin);
+      const maxBonusRespins = Number(bonusFields.maxBonusRespins);
+      const respinProven =
+        Number.isFinite(maxBonusRespins) &&
+        maxBonusRespins > 0 &&
+        (
+          !Number.isFinite(currentBonusRespin) ||
+          currentBonusRespin < maxBonusRespins
+        );
+
+      if (respinProven) {
+        const respin = await frame.evaluate(() => {
+          try {
+            const event = globalThis.BGVars?.Evt_ToServer_SendBonusRespin;
+            if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
+              return {
+                ok: false,
+                kind: 'bonus-respin',
+                reason: 'BGVars.Evt_ToServer_SendBonusRespin unavailable'
+              };
+            }
+
+            XT.TriggerEvent(event);
+            return {
+              ok: true,
+              kind: 'bonus-respin',
+              strategy: 'XT.TriggerEvent(BGVars.Evt_ToServer_SendBonusRespin)'
+            };
+          } catch (error) {
+            return {
+              ok: false,
+              kind: 'bonus-respin',
+              reason: String(error?.message || error)
+            };
+          }
+        });
+
+        return {
+          ...respin,
+          state,
+          currentBonusRespin:
+            Number.isFinite(currentBonusRespin) ? currentBonusRespin : null,
+          maxBonusRespins
+        };
+      }
+
       return {
         ok: false,
         needsBonusInit: true,
