@@ -12,6 +12,9 @@ Define the behavior required to traverse provider games whose feature flow is no
 BASE:
 normal playable state.
 
+CONFIGURATION:
+pre-action state whose mutable settings alter purchase/feature semantics or branch topology. Examples: active lines, feature mode, volatility/ante mode when provider evidence marks it structural.
+
 PURCHASE_MENU:
 one action exposed multiple feature purchase candidates.
 
@@ -36,6 +39,48 @@ feature ended and normal/base action is available again.
 UNKNOWN:
 insufficient evidence.
 
+## Configuration dimensions
+
+Configuration MUST be part of state identity when provider evidence shows it affects:
+- available purchase options;
+- purchase price formula beyond trivial display formatting;
+- feature selector payload;
+- payout/feature logic;
+- subsequent state topology.
+
+For a finite structural dimension:
+- enumerate each supported value;
+- create one replayable configuration control per value;
+- queue each resulting state before purchase traversal;
+- never dedupe states across different structural values.
+
+Example observed in Belatra Legacy of Doom:
+```text
+nlines in 1..10
+configuration(nlines)
+  -> purchase
+  -> feature
+```
+
+Store dependent values such as betPerLine and betPerGame in the snapshot.
+
+Do not automatically cross-product every monetary denomination. Promote a bet dimension to structural only when evidence shows more than scalar money scaling or when it changes available actions/options/state topology.
+
+## Selection versus submission
+
+A choice and its submit/confirm action are separate transitions when the runtime exposes both.
+
+Required model:
+```text
+PURCHASE_MENU
+  -> SELECT(option)
+  -> CONFIRMATION
+  -> SUBMIT/START/BUY
+  -> FEATURE_ACTIVE
+```
+
+Do not treat SELECT as purchase completion.
+
 ## Transition contract
 
 After every action A:
@@ -45,10 +90,12 @@ After every action A:
 3. wait minimum action delay
 4. read runtime/provider snapshot S1
 5. parse request/response delta D=N[N0:]
-6. enter settle loop
+6. capture provider plaintext/runtime protocol events when available
+7. enter settle loop
 
 Settle loop ends only when:
 - no gameplay protocol request appears for quiet window AND
+- no provider plaintext protocol event appears for quiet window AND
 - normalized state fingerprint is stable for quiet window
 
 Static resources and telemetry do not reset quiet window.
@@ -118,7 +165,7 @@ Examples:
 - BGaming JSON-RPC: result.final=true
 - Pragmatic: bonus/game state indicates end; doBonus/doSpin response semantics
 - 3Oaks: Flow/model returns base/idle state
-- Belatra: currently UNKNOWN at encrypted transport layer
+- Belatra: plaintext ajaxQueue actions + runtime state; universal terminal rule remains partially unknown
 
 ## Normalized edge record
 
@@ -128,7 +175,9 @@ Examples:
   "action": {},
   "press": {"ok": true},
   "network": [],
-  "protocol": [],
+  "protocol": [
+    {"provider":"belatra","payload":{"q":"savePlayerChoice","name":"Bonus2","att":0,"info":3}}
+  ],
   "automatic": {
     "waitedMs": 0,
     "transitions": []
