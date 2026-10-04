@@ -20,6 +20,7 @@ export function parseArgs(argv) {
     treeAutoWaitMs: 8_000,
     treeQuietMs: 900,
     treeRepeatLimit: 20,
+    reuseContext: false,
     catalog: [],
     maxGames: 0
   };
@@ -43,6 +44,7 @@ export function parseArgs(argv) {
     else if (a === '--tree-auto-wait') out.treeAutoWaitMs = Number(next());
     else if (a === '--tree-quiet') out.treeQuietMs = Number(next());
     else if (a === '--tree-repeat-limit') out.treeRepeatLimit = Number(next());
+    else if (a === '--reuse-context') out.reuseContext = true;
     else if (a === '--catalog') out.catalog.push(next());
     else if (a === '--max-games') out.maxGames = Number(next());
     else if (a === '--help' || a === '-h') out.help = true;
