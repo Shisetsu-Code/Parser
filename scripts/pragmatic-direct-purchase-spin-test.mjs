@@ -86,8 +86,17 @@ for(const [name,slug,index] of CASES){
     await runtime.provider.waitReady?.(runtime.frame,10000).catch(()=>null);
     row.options=await runtime.provider.listPurchases(runtime.frame);
 
-    row.press=await runtime.provider.purchase(runtime.frame,index);
-    row.before=await runtime.frame.evaluate(()=>({
+    // Recreate production contract: execute purchase from a clean game session.
+    await page.goto(urlFor(slug),{waitUntil:'domcontentloaded',timeout:30000});
+    await page.waitForTimeout(2200);
+    await bootstrapSupportedPage(page);
+    const executionRuntime=await findRuntime(page,30000);
+    if(!executionRuntime||executionRuntime.provider.id!=='pragmatic') throw new Error('execution runtime not found');
+    const ready=await executionRuntime.provider.waitReady?.(executionRuntime.frame,10000).catch(()=>null);
+    if(!ready?.ok) throw new Error('execution base state not ready');
+
+    row.press=await executionRuntime.provider.purchase(executionRuntime.frame,index);
+    row.before=await executionRuntime.frame.evaluate(()=>({
       canSpin:(()=>{try{return Vars.CanSpin?XT.GetBool(Vars.CanSpin):null}catch{return null}})(),
       purchaseIndex:(()=>{try{return XT.GetObject(Vars.FeaturePurchase)?.purchaseIndex??null}catch{return null}})(),
       hasEvent:Boolean(Vars.Evt_ToServer_RequestSpin),
@@ -97,7 +106,7 @@ for(const [name,slug,index] of CASES){
     const requestBase=requests.length;
     const responseBase=responses.length;
 
-    row.trigger=await runtime.frame.evaluate(()=>{
+    row.trigger=await executionRuntime.frame.evaluate(()=>{
       try{
         if(!window.XT||!window.Vars) return {ok:false,reason:'XT/Vars unavailable'};
         const event=Vars.Evt_ToServer_RequestSpin;
@@ -113,7 +122,7 @@ for(const [name,slug,index] of CASES){
     await page.waitForTimeout(2500);
     await Promise.allSettled([...tasks]);
 
-    row.after=await runtime.frame.evaluate(()=>({
+    row.after=await executionRuntime.frame.evaluate(()=>({
       canSpin:(()=>{try{return Vars.CanSpin?XT.GetBool(Vars.CanSpin):null}catch{return null}})(),
       purchaseIndex:(()=>{try{return XT.GetObject(Vars.FeaturePurchase)?.purchaseIndex??null}catch{return null}})()
     }));
