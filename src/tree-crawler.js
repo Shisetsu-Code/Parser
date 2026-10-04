@@ -15,6 +15,8 @@ function replayDescriptor(control) {
     method: control?.method ?? null,
     configKey: control?.configKey ?? null,
     configValue: control?.configValue ?? null,
+    economicKind: control?.economicKind ?? null,
+    purchaseSubtype: control?.purchaseSubtype ?? null,
     active: control?.active ?? null
   };
 }
@@ -63,7 +65,9 @@ function controlPriority(control) {
     control?.type,
     control?.method,
     control?.configKey,
-    control?.configValue
+    control?.configValue,
+    control?.economicKind,
+    control?.purchaseSubtype
   ].filter(v => v != null).join(' ').toLowerCase();
 
   let score = 0;
@@ -115,7 +119,9 @@ function isFeatureishControl(control) {
     control?.event,
     control?.method,
     control?.purchaseIndex,
-    control?.optionIndex
+    control?.optionIndex,
+    control?.economicKind,
+    control?.purchaseSubtype
   ].filter(v => v != null).join(' ').toLowerCase();
 
   return /(purchase|buy|feature|bonus|free.?spin|ante|chance|boost|super.?spin|enhanced.?spin|confirm|rebuy|o_\d|button\d)/i.test(text);
@@ -220,7 +226,9 @@ function semanticControlKey(control) {
     control?.type ?? '',
     control?.method ?? '',
     control?.configKey ?? '',
-    control?.configValue ?? ''
+    control?.configValue ?? '',
+    control?.economicKind ?? '',
+    control?.purchaseSubtype ?? ''
   ].map(String).join('|');
 }
 
@@ -246,7 +254,9 @@ function controlIdentity(control) {
     control?.type ?? '',
     control?.method ?? '',
     control?.configKey ?? '',
-    control?.configValue ?? ''
+    control?.configValue ?? '',
+    control?.economicKind ?? '',
+    control?.purchaseSubtype ?? ''
   ].map(String).join('|');
 }
 
