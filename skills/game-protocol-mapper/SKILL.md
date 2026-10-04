@@ -78,6 +78,31 @@ Output:
 - replay prerequisites
 - unknowns
 
+## Structural configuration before actions
+
+Before traversing purchases/features, inspect whether the provider exposes finite configuration dimensions that materially change behavior.
+
+Examples:
+- active lines;
+- provider mode/feature level;
+- line-dependent bet assortment;
+- other settings that alter request selectors or feature topology.
+
+If a dimension is structural:
+1. enumerate its supported values;
+2. emit exact replayable configuration controls;
+3. include the current value and dependent values in stateSnapshot;
+4. traverse purchase/features from every distinct configuration state;
+5. never dedupe across different structural values.
+
+Belatra Legacy of Doom is the canonical observed case:
+- useBetDependOnLines=true;
+- nlines is finite;
+- betPerGame depends on nlines and betPerLine;
+- payout/feature code uses nlines.
+
+Do not automatically cross-product every monetary denomination unless topology/selector semantics differ. Keep monetary values in state even when treated parametrically.
+
 ## Purchase handling
 
 Do not model purchase as one scalar unless evidence proves it.
@@ -126,6 +151,17 @@ else:
 ```
 
 Never send a second pick while previous result is pending.
+
+## Selection and submit are separate
+
+When an option must be selected and then START/BUY/YES/CONFIRM is pressed:
+
+```text
+open menu -> select option -> observe selected state -> confirm/submit -> wait
+```
+
+Never collapse selection and submission into one logical action.
+Preserve the selected option in state so replay can reproduce the confirmation path.
 
 ## Internal selections
 
@@ -187,7 +223,26 @@ Preserve full purchase selector.
 
 ### Belatra
 POST /game multiplexes opaque d.
-Prefer hooking plaintext before serialization.
+
+Preferred runtime path:
+- validate global all_content runtime;
+- read data/unitmng state;
+- hook ajaxQueue.post before d serialization;
+- capture plaintext q/name/att/info actions;
+- capture Buy Bonus banner instance;
+- separate buy option from confirm;
+- when useBetDependOnLines=true, enumerate line configurations before purchase.
+
+Current sampled core ABI validates:
+- all_content(2731).data
+- all_content(9337).unitmng
+- all_content(1129).ajaxQueue
+
+Treat module IDs as version-specific; validate before use.
+
+savePlayerChoice must be modeled as a semantic selection action:
+(name, att) identifies selection state; info identifies sibling choice.
+
 CI Cloudflare challenge is CI_ACCESS_BLOCK, not protocol failure.
 
 ## Code update policy
@@ -213,6 +268,9 @@ For a new mapping:
 - verify replayFailures
 - verify request/response correlation
 - verify sibling branch isolation
+- verify selection -> confirmation as separate states when applicable
+- verify structural configuration dimensions are not deduped
+- verify provider plaintext protocol events are correlated to the action
 - verify terminal/continuation behavior
 
 If provider DEMO is inaccessible in CI:
