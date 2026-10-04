@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "labels": [
+      "OBSERVED",
+      "IMPLEMENTED",
+      "INFERRED",
+      "UNKNOWN"
+    ],
+    "secrets": "Do not store session tokens, launch tokens, sid values, state_lock values, mgckey session values, or opaque encrypted payloads as reusable constants.",
+    "source_priority": [
+      "HAR request/response",
+      "runtime state",
+      "repository adapter",
+      "UI heuristic"
+    ]
+  },
+  "sources": [
+    {
+      "provider": "Belatra",
+      "file": "belatragames.com_Archive [26-10-03 20-34-36].har",
+      "game": "Stars Blast",
+      "observed": [
+        "POST /game",
+        "body fields d and sid",
+        "opaque d response",
+        "multiplexed gameplay transport"
+      ]
+    },
+    {
+      "provider": "Pragmatic",
+      "file": "www.pragmaticplay.com_Archive [26-10-03 20-41-24].har",
+      "game": "Big Bass Mission Fishin'",
+      "symbol": "vs10bbfmission",
+      "observed": [
+        "doInit",
+        "doSpin"
+      ],
+      "associated_bundle_evidence": [
+        "BonusPick_BBFM",
+        "FSPicker_BBFM",
+        "doBonus",
+        "ind selection",
+        "post-purchase internal selection tree"
+      ]
+    },
+    {
+      "provider": "BGaming",
+      "file": "bgaming.com_Archive [26-10-03 21-16-03].har",
+      "game": "Divine Queen: Heart of Ice",
+      "family": "command",
+      "observed": [
+        "freespin_buy",
+        "freespin_chance",
+        "available_actions",
+        "freespin continuation"
+      ]
+    },
+    {
+      "provider": "BGaming",
+      "file": "bgaming.com_Archive [26-10-03 21-24-25].har",
+      "game": "Alien Fruits 3",
+      "family": "command",
+      "observed": [
+        "bonus_buy",
+        "bonus_chance",
+        "purchase may terminate immediately"
+      ]
+    },
+    {
+      "provider": "BGaming",
+      "file": "bgaming.com_Archive [26-10-03 21-40-54].har",
+      "game": "Reel of Ra",
+      "family": "command",
+      "observed": [
+        "bonus_buy",
+        "bonus_chance",
+        "freespin continuation"
+      ]
+    },
+    {
+      "provider": "BGaming",
+      "file": "bgaming.com_Archive [26-10-03 21-44-19].har",
+      "game": "Chicken Fire",
+      "family": "jsonrpc",
+      "observed": [
+        "buy_chance",
+        "buy_bonus",
+        "feature_id selector",
+        "final",
+        "state_lock"
+      ]
+    },
+    {
+      "provider": "BGaming",
+      "file": "bgaming.com_Archive [26-10-03 21-50-03].har",
+      "game": "St Patrick's Pots Hold & Win",
+      "family": "command",
+      "observed": [
+        "bonus_buy",
+        "purchased_feature_level selector",
+        "bonus_chance",
+        "respin continuation"
+      ]
+    },
+    {
+      "provider": "BGaming",
+      "file": "bgaming.com_Archive [26-10-03 21-55-16].har",
+      "game": "Red Hot Chilli Chickens",
+      "family": "jsonrpc",
+      "observed": [
+        "bonus_buy",
+        "isSuperBonus selector",
+        "final",
+        "state_lock"
+      ]
+    },
+    {
+      "provider": "BGaming",
+      "file": "bgaming.com_Archive [26-10-03 21-57-13].har",
+      "game": "Big Bucks Saloon",
+      "family": "jsonrpc",
+      "observed": [
+        "buy_bonus",
+        "multi-play continuation",
+        "final",
+        "state_lock"
+      ]
+    },
+    {
+      "provider": "BGaming",
+      "file": "demo.bgaming-network.com_Archive [26-10-03 22-01-30].har",
+      "game": "Aloha King Elvis",
+      "family": "command",
+      "observed": [
+        "bonus_buy",
+        "freespin_buy",
+        "bonus_chance",
+        "freespin_chance",
+        "respin continuation",
+        "freespin continuation"
+      ]
+    },
+    {
+      "provider": "BGaming",
+      "file": "mystic-reels.demo.bgaming-network.com_Archive [26-10-03 22-05-29].har",
+      "game": "Mystic Reels",
+      "family": "jsonrpc",
+      "observed": [
+        "buy_chance",
+        "buy_bonus",
+        "final",
+        "state_lock",
+        "BASIC",
+        "RESPIN_BUY",
+        "BONUS_BUY"
+      ]
+    }
+  ]
+}
