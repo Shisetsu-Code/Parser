@@ -139,3 +139,56 @@ with purchaseIndex as contextual state, not mandatory identity for confirm/windo
 - Universal semantics for every bgid family.
 
 Preserve raw protocol fields.
+
+
+## 20-game purchase audit — 2026-10-04
+
+Audit implementation:
+`scripts/pragmatic-purchase-audit.mjs`
+
+Validation order:
+1. server `doInit` response `purInit` for the actual DEMO session;
+2. runtime `FeaturePurchaseOption` / `FeaturePurchaseV2` / `FeaturePurchaseManager`;
+3. Parser `listPurchases()`.
+
+`purInit` is authoritative for purchases enabled in the current session/configuration.
+Runtime components can exist as placeholders even when the server exposes zero purchases.
+
+Final v3 sample:
+
+| game | Parser | server purInit | result |
+| --- | ---: | ---: | --- |
+| Gates of Olympus 2500 | 4 | 4 | PASS |
+| Triple Hop Pots | 0 | 0 | PASS |
+| Helios – Triple Sun | 2 | 2 | PASS |
+| Eternal Diamonds | 3 | 3 | PASS |
+| Lucky Drums 88 | 1 | 1 | PASS |
+| Ra vs Osiris | 4 | 4 | PASS |
+| Gates of Olympus POP | 1 candidate | 0 | MISMATCH / runtime placeholder |
+| Heart of Venus | 3 | 3 | PASS |
+| Eastern Fury | 2 | 2 | PASS |
+| Jelly Express | 2 | 2 | PASS |
+| Fortune of Olympus | 2 | 2 | PASS |
+| Sweet Rush Bonanza | 2 | 2 | PASS |
+| Big Bass Bonanza 1000 | 2 | 2 | PASS |
+| Gates of Olympus Super Scatter | 2 | 2 | PASS |
+| Sweet Bonanza Super Scatter | 2 | 2 | PASS |
+| Gates of Hades | 2 | 2 | PASS |
+| The Dog House Megaways 1000 | 3 | 3 | PASS |
+| Starlight Princess Super Scatter | 2 | 2 | PASS |
+| Mahjong Wins Super Scatter | 1 | 1 | PASS |
+| Bandit Megaways | 2 | 2 | PASS |
+
+Result:
+- 19/20 exact matches after parser fixes.
+- 1 false-positive runtime candidate: Gates of Olympus POP.
+- zero audit execution errors.
+
+Bugs discovered and fixed during the audit:
+- transient `purchaseOptionIsAvailable=false` must not mean the option does not exist;
+- `FeaturePurchaseV2.purchaseOptions` may populate asynchronously;
+- some games instantiate purchase UI only after the Buy Feature menu opens;
+- controls with negative `purchaseIndex` such as Rebuy are not independent purchase options.
+
+Remaining rule:
+when `purInit` is explicitly absent/zero, server truth must override empty/placeholder runtime purchase components.
