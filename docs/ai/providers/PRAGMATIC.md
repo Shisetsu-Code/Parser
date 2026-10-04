@@ -246,3 +246,24 @@ Combined evidence:
 
 Conclusion:
 for Pragmatic purchase count, server `doInit.purInit` is authoritative for the current session. Runtime controls are implementation handles, not purchase-count truth.
+
+
+## Purchase scope clarification
+
+Project-level PURCHASE semantics are broader than Pragmatic `purInit`.
+
+`purInit` validates Feature Purchase / Buy Feature options only.
+
+The total PURCHASE inventory for a game must additionally include separately priced runtime controls such as:
+- Ante Bet / Bonus Chance / Double Chance
+- Super Spin / enhanced spin modes
+- boosters or other extra-cost modifiers
+
+Therefore the earlier 20-game `purInit` audits validate the Buy Feature subset, not the complete paid-purchase count under the project definition.
+
+Normalized representation:
+```text
+PURCHASE
+  subtype=buy_feature | ante_bet | chance | super_spin | booster | other_paid_modifier
+  resulting_feature=free_spins | bonus | respin | enhanced_chance | enhanced_spin | unknown
+```
