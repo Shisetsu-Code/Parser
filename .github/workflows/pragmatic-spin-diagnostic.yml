@@ -1,0 +1,28 @@
+name: Pragmatic spin diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/pragmatic-spin-diagnostic.mjs"
+      - ".github/workflows/pragmatic-spin-diagnostic.yml"
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - run: npm run pragmatic:spin-diagnostic
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pragmatic-spin-diagnostic
+          path: results/pragmatic-spin-diagnostic.json
+          if-no-files-found: warn
