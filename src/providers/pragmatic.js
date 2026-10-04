@@ -23,12 +23,14 @@ export const pragmatic = {
     const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 10_000);
     let last = null;
     const actions = [];
+    const attempted = new Set();
 
     while (Date.now() < deadline) {
       last = await frame.evaluate(() => {
         const read = fn => { try { return fn(); } catch { return null; } };
         const roots = globalThis.globalRuntime?.sceneRoots || [];
         const safeControls = [];
+        const pickerControls = [];
 
         if (globalThis.XTButton) {
           for (let ri = 0; ri < roots.length; ri++) {
@@ -44,7 +46,20 @@ export const pragmatic = {
 
                 const normalSpin =
                   /evt_datatocode_pressed_spin/i.test(event) ||
-                  /(?:^|_)spin(?:_|$)/i.test(name) && /pressed_spin/i.test(event);
+                  (/(?:^|_)spin(?:_|$)/i.test(name) && /pressed_spin/i.test(event));
+
+                const picker =
+                  /itempicked|bonuspick|fsbgpick|pickitem|select(?:ed)?option/i.test(text);
+
+                if (picker) {
+                  pickerControls.push({
+                    root:ri,
+                    index:bi,
+                    name,
+                    event
+                  });
+                  continue;
+                }
 
                 if (normalSpin) continue;
 
@@ -76,7 +91,19 @@ export const pragmatic = {
               ? XT.GetBool(Vars.FeaturePurchaseWindowIsOpen)
               : null
           ),
-          safeControls
+          gameHasIntro: read(() =>
+            window.Vars?.GameHasIntro ? XT.GetBool(Vars.GameHasIntro) : null
+          ),
+          shouldDisplayIntro: read(() =>
+            window.Vars?.ShouldDisplayIntro ? XT.GetBool(Vars.ShouldDisplayIntro) : null
+          ),
+          disableIntroScreen: read(() =>
+            window.Vars?.DisableIntroScreen ? XT.GetBool(Vars.DisableIntroScreen) : null
+          ),
+          hasIntroCloseEvent: Boolean(window.Vars?.Evt_DataToCode_IntroClosePressed),
+          safeControls,
+          pickerControls,
+          preBaseSelection: pickerControls.length > 0
         };
       }).catch(() => null);
 
@@ -87,55 +114,150 @@ export const pragmatic = {
         return { ok: true, ...last, actions };
       }
 
-      if (last?.canSpin === false && Array.isArray(last?.safeControls) && last.safeControls.length) {
-        const chosen = last.safeControls[0];
-        const pressed = await frame.evaluate(({ chosen }) => {
-          try {
-            const roots = globalThis.globalRuntime?.sceneRoots || [];
-            if (!globalThis.XTButton) return { ok:false, reason:'XTButton unavailable' };
+      if (last?.canSpin === false) {
+        const safeControls = Array.isArray(last?.safeControls) ? last.safeControls : [];
 
-            const root = roots[Number(chosen.root)];
-            if (!root) return { ok:false, reason:'root unavailable' };
+        let acted = false;
+        for (const chosen of safeControls) {
+          const baseKey = [
+            chosen.root,
+            chosen.name,
+            chosen.event
+          ].join('|');
 
-            const buttons = root.GetComponentsInChildren(XTButton, true) || [];
-            const candidates = buttons.filter(button => {
+          const strategies = [];
+          if (chosen.canClick) strategies.push('click');
+          if (chosen.canPress) strategies.push('press');
+
+          for (const strategy of strategies) {
+            const key = 'control|' + baseKey + '|' + strategy;
+            if (attempted.has(key)) continue;
+            attempted.add(key);
+
+            const pressed = await frame.evaluate(({ chosen, strategy }) => {
               try {
-                if (button.gameObject?.activeInHierarchy === false) return false;
-                return (
-                  String(button.gameObject?.name || '') === String(chosen.name || '') &&
-                  String(button.eventToCode?.name || '') === String(chosen.event || '')
-                );
-              } catch {
-                return false;
+                const roots = globalThis.globalRuntime?.sceneRoots || [];
+                if (!globalThis.XTButton) return { ok:false, reason:'XTButton unavailable' };
+
+                const root = roots[Number(chosen.root)];
+                if (!root) return { ok:false, reason:'root unavailable' };
+
+                const buttons = root.GetComponentsInChildren(XTButton, true) || [];
+                const candidates = buttons.filter(button => {
+                  try {
+                    if (button.gameObject?.activeInHierarchy === false) return false;
+                    return (
+                      String(button.gameObject?.name || '') === String(chosen.name || '') &&
+                      String(button.eventToCode?.name || '') === String(chosen.event || '')
+                    );
+                  } catch {
+                    return false;
+                  }
+                });
+
+                const button = candidates[0];
+                if (!button) return { ok:false, reason:'safe control disappeared' };
+
+                if (strategy === 'click' && typeof button.OnClick === 'function') {
+                  button.OnClick();
+                  return {
+                    ok:true,
+                    strategy:'OnClick()',
+                    name:chosen.name,
+                    event:chosen.event
+                  };
+                }
+
+                if (strategy === 'press' && typeof button.OnPress === 'function') {
+                  button.OnPress(true);
+                  button.OnPress(false);
+                  return {
+                    ok:true,
+                    strategy:'OnPress(true/false)',
+                    name:chosen.name,
+                    event:chosen.event
+                  };
+                }
+
+                return { ok:false, reason:'requested safe-control strategy unavailable' };
+              } catch (error) {
+                return { ok:false, reason:String(error?.message || error) };
               }
+            }, { chosen, strategy }).catch(error => ({
+              ok:false,
+              reason:String(error?.message || error)
+            }));
+
+            actions.push({
+              at: Date.now(),
+              kind: 'safe-control',
+              control: chosen,
+              strategy,
+              press: pressed
             });
 
-            const button = candidates[0];
-            if (!button) return { ok:false, reason:'safe control disappeared' };
-
-            if (typeof button.OnPress === 'function') {
-              button.OnPress(true);
-              button.OnPress(false);
-              return { ok:true, strategy:'OnPress(true/false)', name:chosen.name, event:chosen.event };
-            }
-            if (typeof button.OnClick === 'function') {
-              button.OnClick();
-              return { ok:true, strategy:'OnClick()', name:chosen.name, event:chosen.event };
-            }
-            return { ok:false, reason:'safe control not invokable' };
-          } catch (error) {
-            return { ok:false, reason:String(error?.message || error) };
+            await frame.page().waitForTimeout(550);
+            acted = true;
+            break;
           }
-        }, { chosen }).catch(error => ({ ok:false, reason:String(error?.message || error) }));
 
-        actions.push({
-          at: Date.now(),
-          control: chosen,
-          press: pressed
-        });
+          if (acted) break;
+        }
 
-        await frame.page().waitForTimeout(450);
-        continue;
+        if (acted) continue;
+
+        const canUseIntroEvent =
+          last?.preBaseSelection !== true &&
+          last?.hasIntroCloseEvent === true &&
+          (
+            last?.shouldDisplayIntro === true ||
+            last?.gameHasIntro === true
+          );
+
+        if (canUseIntroEvent && !attempted.has('event|Evt_DataToCode_IntroClosePressed')) {
+          attempted.add('event|Evt_DataToCode_IntroClosePressed');
+
+          const triggered = await frame.evaluate(() => {
+            try {
+              if (!globalThis.XT || !globalThis.Vars?.Evt_DataToCode_IntroClosePressed) {
+                return { ok:false, reason:'IntroClose event unavailable' };
+              }
+              if (typeof XT.TriggerEvent !== 'function') {
+                return { ok:false, reason:'XT.TriggerEvent unavailable' };
+              }
+
+              XT.TriggerEvent(Vars.Evt_DataToCode_IntroClosePressed);
+              return {
+                ok:true,
+                strategy:'XT.TriggerEvent(Vars.Evt_DataToCode_IntroClosePressed)'
+              };
+            } catch (error) {
+              return { ok:false, reason:String(error?.message || error) };
+            }
+          }).catch(error => ({
+            ok:false,
+            reason:String(error?.message || error)
+          }));
+
+          actions.push({
+            at: Date.now(),
+            kind: 'safe-event',
+            event: 'Evt_DataToCode_IntroClosePressed',
+            press: triggered
+          });
+
+          await frame.page().waitForTimeout(650);
+          continue;
+        }
+
+        if (last?.preBaseSelection === true) {
+          return {
+            ok: false,
+            ...last,
+            actions,
+            reason: 'Pragmatic pre-base selection requires explicit branch handling'
+          };
+        }
       }
 
       await frame.page().waitForTimeout(180);
