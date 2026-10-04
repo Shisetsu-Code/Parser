@@ -14,7 +14,8 @@
     "pragmatic:audit20": "node scripts/pragmatic-purchase-audit.mjs",
     "pragmatic:audit-more20": "node scripts/pragmatic-purchase-audit-more20.mjs",
     "pragmatic:feature-audit": "node scripts/pragmatic-feature-audit.mjs",
-    "pragmatic:spin-diagnostic": "node scripts/pragmatic-spin-diagnostic.mjs"
+    "pragmatic:spin-diagnostic": "node scripts/pragmatic-spin-diagnostic.mjs",
+    "pragmatic:purchase-diagnostic": "node scripts/pragmatic-purchase-runtime-diagnostic.mjs"
   },
   "dependencies": {
     "playwright": "^1.55.0"
