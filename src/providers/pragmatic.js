@@ -501,6 +501,83 @@ export const pragmatic = {
         return false;
       };
 
+      const confirmPurchaseIfNeeded = async () => {
+        let isOpen = null;
+        try {
+          isOpen = Vars.FeaturePurchaseWindowIsOpen
+            ? XT.GetBool(Vars.FeaturePurchaseWindowIsOpen)
+            : null;
+        } catch {}
+
+        const confirmations = [];
+
+        if (window.FeaturePurchaseOption) {
+          for (const root of roots) {
+            let options = [];
+            try { options = root.GetComponentsInChildren(FeaturePurchaseOption, true) || []; } catch {}
+            for (const option of options) {
+              try {
+                if (Number(option.type) !== 1) continue;
+                if (option.gameObject?.activeInHierarchy === false) continue;
+                confirmations.push({
+                  kind: 'FeaturePurchaseOption',
+                  name: option.gameObject?.name ?? null,
+                  target: option
+                });
+              } catch {}
+            }
+          }
+        }
+
+        if (window.XTButton) {
+          const buttons = [];
+          for (const root of roots) {
+            try { buttons.push(...(root.GetComponentsInChildren(XTButton, true) || [])); } catch {}
+          }
+
+          for (const button of buttons) {
+            try {
+              if (button.gameObject?.activeInHierarchy === false) continue;
+              const name = String(button.gameObject?.name || '');
+              const event = String(button.eventToCode?.name || '');
+              const text = (name + ' ' + event).toLowerCase();
+
+              if (!/(confirm|yes|accept|start.?buy|buy.?confirm|purchase.?confirm)/i.test(text)) continue;
+              if (/(cancel|close|no)/i.test(text)) continue;
+
+              confirmations.push({
+                kind: 'XTButton',
+                name: button.gameObject?.name ?? null,
+                event: button.eventToCode?.name ?? null,
+                target: button
+              });
+            } catch {}
+          }
+        }
+
+        for (const item of confirmations) {
+          if (!invokeButton(item.target)) continue;
+          await wait(250);
+          return {
+            clicked: true,
+            windowWasOpen: isOpen,
+            kind: item.kind,
+            name: item.name ?? null,
+            event: item.event ?? null
+          };
+        }
+
+        return {
+          clicked: false,
+          windowWasOpen: isOpen,
+          candidates: confirmations.map(item => ({
+            kind: item.kind,
+            name: item.name ?? null,
+            event: item.event ?? null
+          }))
+        };
+      };
+
       if (window.XTButton) {
         const buttons = [];
         for (const root of roots) {
@@ -546,10 +623,14 @@ export const pragmatic = {
             await wait(300);
           }
           const selected = ensurePendingPurchaseIndex();
+          const confirmState = selected === Number(index)
+            ? await confirmPurchaseIfNeeded()
+            : null;
           return {
             ok: selected === Number(index),
             index,
             selectedIndex: selected,
+            confirm: confirmState,
             strategy: confirm
               ? 'FeaturePurchaseOption.OnClick() + confirm.OnClick() + canonical purchaseIndex verify'
               : 'FeaturePurchaseOption.OnClick() + canonical purchaseIndex verify',
@@ -572,10 +653,14 @@ export const pragmatic = {
                 else option[method]();
                 await wait(250);
                 const pending = ensurePendingPurchaseIndex();
+                const confirmState = pending === Number(index)
+                  ? await confirmPurchaseIfNeeded()
+                  : null;
                 return {
                   ok: pending === Number(index),
                   index,
                   selectedIndex: pending,
+                  confirm: confirmState,
                   strategy:
                     'FeaturePurchaseV2.purchaseOptions[' + index + '].' + method +
                     '() + canonical purchaseIndex verify',
@@ -588,10 +673,14 @@ export const pragmatic = {
               manager.PurchaseFeature(index);
               await wait(200);
               const pending = ensurePendingPurchaseIndex();
+              const confirmState = pending === Number(index)
+                ? await confirmPurchaseIfNeeded()
+                : null;
               return {
                 ok: pending === Number(index),
                 index,
                 selectedIndex: pending,
+                confirm: confirmState,
                 strategy: 'FeaturePurchaseV2.PurchaseFeature(index) + canonical purchaseIndex verify',
                 needsSpin: pending === Number(index),
                 reason: pending === Number(index) ? null : 'Canonical FeaturePurchase purchaseIndex was not selected'
@@ -610,10 +699,14 @@ export const pragmatic = {
               manager.PurchaseFeature(index);
               await wait(200);
               const pending = ensurePendingPurchaseIndex();
+              const confirmState = pending === Number(index)
+                ? await confirmPurchaseIfNeeded()
+                : null;
               return {
                 ok: pending === Number(index),
                 index,
                 selectedIndex: pending,
+                confirm: confirmState,
                 strategy: 'FeaturePurchaseManager.PurchaseFeature(index) + canonical purchaseIndex verify',
                 needsSpin: pending === Number(index),
                 reason: pending === Number(index) ? null : 'Canonical FeaturePurchase purchaseIndex was not selected'
@@ -631,10 +724,12 @@ export const pragmatic = {
         if (Number.isFinite(declared) && index >= 0 && index < declared) {
           const pending = ensurePendingPurchaseIndex();
           if (pending === Number(index)) {
+            const confirmState = await confirmPurchaseIfNeeded();
             return {
               ok: true,
               index,
               selectedIndex: pending,
+              confirm: confirmState,
               strategy: 'canonical FeaturePurchase.purchaseIndex fallback',
               needsSpin: true
             };
