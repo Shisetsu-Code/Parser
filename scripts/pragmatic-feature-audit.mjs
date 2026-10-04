@@ -48,6 +48,10 @@ function parsedExchange(response) {
     bgt: body.bgt ?? null,
     end: body.end ?? null,
     bw: body.bw ?? null,
+    rs: body.rs ?? null,
+    rs_c: body.rs_c ?? null,
+    rs_m: body.rs_m ?? null,
+    trail: body.trail ?? null,
     rawRequest: request,
     rawResponse: body
   };
@@ -72,6 +76,9 @@ function responseFeatureActive(exchange) {
   const fs=numberOrNull(exchange.fs);
   const fsmax=numberOrNull(exchange.fsmax);
   if (fsmax != null && fsmax > 0 && fs != null && fs < fsmax) return true;
+
+  if (String(exchange.rs||'').toLowerCase()==='mc') return true;
+  if (exchange.trail != null && /pending|feature/i.test(String(exchange.trail))) return true;
 
   const na=String(exchange.na||'').toLowerCase();
   if (['b','c'].includes(na)) return true;
@@ -101,6 +108,10 @@ function continuationProtocolKey(exchange) {
     bgt:exchange.bgt ?? null,
     end:exchange.end ?? null,
     bw:exchange.bw ?? null,
+    rs:exchange.rs ?? null,
+    rs_c:exchange.rs_c ?? null,
+    rs_m:exchange.rs_m ?? null,
+    trail:exchange.trail ?? null,
     ind:exchange.ind ?? null,
     lInd:exchange.lInd ?? null
   });
@@ -384,6 +395,79 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
           };
           result.status='PASS';
           break;
+        }
+      }
+
+      // Protocol-first continuation: Pragmatic may keep the visible Spin
+      // control disabled during free spins/respin sequences even though na=s is
+      // an explicit instruction to request the next spin. Trigger the canonical
+      // spin event directly instead of waiting for a visible button.
+      const lastNa=String(lastExchange?.na||'').toLowerCase();
+      const lastFs=numberOrNull(lastExchange?.fs);
+      const lastFsMax=numberOrNull(lastExchange?.fsmax);
+      const protocolSpinActive =
+        lastNa==='s' &&
+        (
+          (lastFsMax!=null && lastFsMax>0 && lastFs!=null && lastFs<lastFsMax) ||
+          String(lastExchange?.rs||'').toLowerCase()==='mc' ||
+          (lastExchange?.trail!=null && /pending|feature/i.test(String(lastExchange.trail)))
+        );
+
+      if (protocolSpinActive) {
+        const beforeProtocolSpin=responses.length;
+        const press=await executionRuntime.provider.press(frame,'spin').catch(error=>({
+          ok:false,
+          reason:String(error?.message||error)
+        }));
+
+        const wait=await waitGameplayQuiet(page,responses,{
+          maxMs:5200,
+          quietMs:1300,
+          minMs:450
+        });
+        await Promise.allSettled([...responseTasks]);
+
+        const fresh=responses.slice(beforeProtocolSpin)
+          .map(parsedExchange)
+          .filter(x=>['doSpin','doBonus','doCollect'].includes(x.action));
+
+        if (fresh.length) lastExchange=fresh.at(-1);
+
+        result.steps.push({
+          kind:'protocol-spin',
+          iteration,
+          press,
+          responses:fresh,
+          wait
+        });
+
+        if (press?.ok && fresh.length) {
+          lastResponseIndex=responses.length;
+          continue;
+        }
+      }
+
+      // Protocol collect path.
+      if (lastNa==='c') {
+        const beforeCollect=responses.length;
+        const press=await executionRuntime.provider.press(frame,'collect').catch(error=>({
+          ok:false,
+          reason:String(error?.message||error)
+        }));
+        const wait=await waitGameplayQuiet(page,responses,{
+          maxMs:4200,
+          quietMs:1200,
+          minMs:400
+        });
+        await Promise.allSettled([...responseTasks]);
+        const fresh=responses.slice(beforeCollect)
+          .map(parsedExchange)
+          .filter(x=>['doSpin','doBonus','doCollect'].includes(x.action));
+        if (fresh.length) lastExchange=fresh.at(-1);
+        result.steps.push({kind:'protocol-collect',iteration,press,responses:fresh,wait});
+        if (press?.ok && fresh.length) {
+          lastResponseIndex=responses.length;
+          continue;
         }
       }
 
