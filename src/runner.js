@@ -476,6 +476,11 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
         } catch {}
 
         if (!runtimeStillThere && controlIndex < controls.length - 1) {
+          if (provider.id === 'belatra') {
+            console.log('    Belatra runtime left current game; stopping in-place sweep to avoid creating a new demo session');
+            break;
+          }
+
           console.log('    runtime lost; reloading game before next control');
           await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
           await page.waitForTimeout(options.settleMs);
