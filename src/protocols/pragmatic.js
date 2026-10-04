@@ -82,10 +82,12 @@ export function classifyPragmaticState(exchange) {
   const currentRespin = finite(exchange.rs_c);
   const maxRespins = finite(exchange.rs_m);
 
-  const picker =
+  const unfinishedBonus =
     na === 'b' &&
-    exchange.bgid != null &&
-    end !== 1;
+    (
+      exchange.bgid != null ||
+      end !== 1
+    );
 
   const freeSpins =
     fsmax != null &&
@@ -108,23 +110,14 @@ export function classifyPragmaticState(exchange) {
       currentRespin < maxRespins
     );
 
-  if (picker) {
-    return {
-      phase: 'selection',
-      terminal: false,
-      next: 'bonus',
-      selectionRequired: true,
-      bonusGameId: exchange.bgid,
-      bonusGameType: exchange.bgt
-    };
-  }
-
-  if (na === 'b') {
+  if (na === 'b' || unfinishedBonus) {
     return {
       phase: 'feature',
       terminal: false,
-      next: respinPending ? 'bonus-respin' : 'bonus-init',
-      selectionRequired: false,
+      // The transport alone cannot distinguish a player picker from a bonus
+      // respin/init. Runtime evidence must resolve this.
+      next: respinPending ? 'bonus-respin' : 'bonus',
+      selectionRequired: null,
       bonusGameId: exchange.bgid,
       bonusGameType: exchange.bgt
     };
