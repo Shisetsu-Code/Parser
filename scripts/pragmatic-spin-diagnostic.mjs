@@ -35,7 +35,8 @@ async function runCase(browser, strategy) {
     const runtime=await findRuntime(page,30000);
     if (!runtime || runtime.provider.id!=='pragmatic') throw new Error('runtime not found');
 
-    await page.waitForTimeout(500);
+    await runtime.provider.waitReady?.(runtime.frame, 10_000);
+    await page.waitForTimeout(300);
     await Promise.allSettled([...tasks]);
     const reqBase=requests.length;
     const resBase=responses.length;
