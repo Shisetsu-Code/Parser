@@ -70,7 +70,7 @@ function controlPriority(control) {
   if (control?.active === true) score += 100;
   if (/belatra_config|config_lines/i.test(text)) score += 700;
   if (/purchasefeature/i.test(text)) score += 650;
-  if (/(purchase|buy|feature|confirm|rebuy|o_\d|button\d)/i.test(text)) score += 300;
+  if (/(purchase|buy|feature|ante|chance|boost|super.?spin|enhanced.?spin|confirm|rebuy|o_\d|button\d)/i.test(text)) score += 300;
   if (/(intro|continue|start|close|ok)/i.test(text)) score += 160;
   if (/(spin|play)/i.test(text)) score += 40;
   if (control?.active === false) score -= 15;
@@ -118,7 +118,7 @@ function isFeatureishControl(control) {
     control?.optionIndex
   ].filter(v => v != null).join(' ').toLowerCase();
 
-  return /(purchase|buy|feature|bonus|free.?spin|confirm|rebuy|o_\d|button\d)/i.test(text);
+  return /(purchase|buy|feature|bonus|free.?spin|ante|chance|boost|super.?spin|enhanced.?spin|confirm|rebuy|o_\d|button\d)/i.test(text);
 }
 
 function pathHasFeatureish(path) {
