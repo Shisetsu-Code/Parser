@@ -91,15 +91,116 @@ export async function writeJson(file, value) {
   await fs.writeFile(file, JSON.stringify(value, null, 2));
 }
 
+const SECRET_KEY_RX = /^(?:sid|session|sessionid|session_id|token|auth|authorization|key|mgckey|launch_token|jwt)$/i;
+
+function truncateText(value, max = 64_000) {
+  if (value == null) return null;
+  const text = String(value);
+  return text.length <= max ? text : text.slice(0, max) + '…';
+}
+
+export function sanitizeTransportUrl(value) {
+  try {
+    const u = new URL(String(value));
+    for (const key of [...u.searchParams.keys()]) {
+      if (SECRET_KEY_RX.test(key)) u.searchParams.set(key, '[redacted]');
+    }
+    return u.toString();
+  } catch {
+    return truncateText(value, 8_000);
+  }
+}
+
+export function sanitizeTransportText(value, max = 64_000) {
+  if (value == null) return null;
+  const text = String(value);
+
+  // URL-encoded Pragmatic/Belatra-style payloads: preserve semantic fields
+  // while redacting reusable credentials/session material.
+  if (/(?:^|&)[A-Za-z0-9_]+=[^&]*/.test(text)) {
+    try {
+      const params = new URLSearchParams(text);
+      let recognized = false;
+      for (const [key] of params.entries()) {
+        recognized = true;
+        if (SECRET_KEY_RX.test(key)) params.set(key, '[redacted]');
+      }
+      if (recognized) return truncateText(params.toString(), max);
+    } catch {}
+  }
+
+  // JSON payloads: recursively redact obvious credential fields.
+  try {
+    const parsed = JSON.parse(text);
+    const seen = new WeakSet();
+    const clean = JSON.stringify(parsed, (key, current) => {
+      if (SECRET_KEY_RX.test(String(key))) return '[redacted]';
+      if (current && typeof current === 'object') {
+        if (seen.has(current)) return '[circular]';
+        seen.add(current);
+      }
+      return current;
+    });
+    return truncateText(clean, max);
+  } catch {}
+
+  return truncateText(
+    text
+      .replace(/((?:sid|session|token|mgckey|launch_token)=)[^&\s]+/gi, '$1[redacted]')
+      .replace(/("(?:sid|session|token|mgckey|launch_token)"\s*:\s*")[^"]+/gi, '$1[redacted]'),
+    max
+  );
+}
+
 export function summarizeRequest(req) {
   let postData = null;
   try { postData = req.postData(); } catch {}
+  const url = sanitizeTransportUrl(req.url());
+  let endpoint = url;
+  try {
+    const u = new URL(url);
+    endpoint = u.pathname;
+  } catch {}
+
   return {
     at: Date.now(),
+    direction: 'request',
     method: req.method(),
-    url: req.url(),
+    url,
+    endpoint,
     resourceType: req.resourceType(),
-    postData: postData && postData.length <= 16_000 ? postData : (postData ? `${postData.slice(0, 16_000)}…` : null)
+    postData: sanitizeTransportText(postData, 64_000)
+  };
+}
+
+export async function summarizeResponse(response) {
+  const request = response.request();
+  const url = sanitizeTransportUrl(response.url());
+  let endpoint = url;
+  try {
+    const u = new URL(url);
+    endpoint = u.pathname;
+  } catch {}
+
+  let body = null;
+  let bodyUnavailable = null;
+  try {
+    body = sanitizeTransportText(await response.text(), 128_000);
+  } catch (error) {
+    bodyUnavailable = String(error?.message || error);
+  }
+
+  return {
+    at: Date.now(),
+    direction: 'response',
+    method: request.method(),
+    url,
+    endpoint,
+    status: response.status(),
+    contentType: response.headers()['content-type'] || null,
+    requestPostData: sanitizeTransportText(request.postData(), 64_000),
+    body,
+    bodyUnavailable
   };
 }
 
