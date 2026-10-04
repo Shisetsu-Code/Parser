@@ -277,12 +277,77 @@ export const pragmatic = {
       const read = fn => { try { return fn(); } catch { return null; } };
       const fp = read(() => XT.GetObject(Vars.FeaturePurchase));
       const selected = read(() => window.FeaturePurchaseVars ? XT.GetObject(FeaturePurchaseVars.FeaturePurchase_SelectedOption) : null);
+
+      const runtimeButtons = {
+        spinActive: null,
+        stopActive: null,
+        bonusContinueActive: false,
+        introCloseActive: false,
+        freeSpinsContinueActive: false,
+        activePickerCount: 0
+      };
+
+      try {
+        if (window.globalRuntime && window.XTButton) {
+          const roots = globalRuntime.sceneRoots || [];
+          const buttons = [];
+          for (const root of roots) {
+            try { buttons.push(...(root.GetComponentsInChildren(XTButton, true) || [])); } catch {}
+          }
+
+          let spinSeen = false;
+          let stopSeen = false;
+
+          for (const button of buttons) {
+            let active = false;
+            let name = '';
+            let event = '';
+            try { active = button.gameObject?.activeInHierarchy === true; } catch {}
+            try { name = String(button.gameObject?.name || ''); } catch {}
+            try { event = String(button.eventToCode?.name || ''); } catch {}
+            const text = (name + ' ' + event).toLowerCase();
+
+            if (/evt_datatocode_pressed_spin/i.test(event)) {
+              spinSeen = true;
+              if (active) runtimeButtons.spinActive = true;
+              else if (runtimeButtons.spinActive !== true) runtimeButtons.spinActive = false;
+            }
+
+            if (/evt_datatocode_pressed_stop/i.test(event)) {
+              stopSeen = true;
+              if (active) runtimeButtons.stopActive = true;
+              else if (runtimeButtons.stopActive !== true) runtimeButtons.stopActive = false;
+            }
+
+            if (/bonusroundsoncontinuepressed/i.test(text)) {
+              if (active) runtimeButtons.bonusContinueActive = true;
+            }
+
+            if (/introclosepressed/i.test(text)) {
+              if (active) runtimeButtons.introCloseActive = true;
+            }
+
+            if (/freespinswindowwincollectpressed/i.test(text)) {
+              if (active) runtimeButtons.freeSpinsContinueActive = true;
+            }
+
+            if (/itempicked|bonuspick|fsbgpick|pickitem|select(?:ed)?option/i.test(text)) {
+              if (active) runtimeButtons.activePickerCount++;
+            }
+          }
+
+          if (!spinSeen) runtimeButtons.spinActive = null;
+          if (!stopSeen) runtimeButtons.stopActive = null;
+        }
+      } catch {}
+
       return {
         featurePurchaseIndex: fp?.purchaseIndex ?? null,
         selectedPurchaseIndex: selected?.purchaseIndex ?? null,
         featurePurchaseWindowIsOpen: read(() => Vars.FeaturePurchaseWindowIsOpen ? XT.GetBool(Vars.FeaturePurchaseWindowIsOpen) : null),
         canSpin: read(() => Vars.CanSpin ? XT.GetBool(Vars.CanSpin) : null),
-        autoplaySpinsLeft: read(() => Vars.AutoplaySpinsLeft ? XT.GetInt(Vars.AutoplaySpinsLeft) : null)
+        autoplaySpinsLeft: read(() => Vars.AutoplaySpinsLeft ? XT.GetInt(Vars.AutoplaySpinsLeft) : null),
+        runtimeButtons
       };
     }).catch(() => null);
   },
