@@ -17,7 +17,7 @@ Current mapped provider set:
 - Pragmatic Play — provider-specific runtime adapter + advanced protocol knowledge.
 - 3Oaks — provider-specific GameRunner adapter + partial/advanced protocol/runtime knowledge.
 - BGaming — generic Canvas runtime support + HAR-derived provider protocol map covering command and JSON-RPC families.
-- Belatra — HAR-derived multiplexed `POST /game` transport map; CI DEMO access may be blocked by provider anti-bot.
+- Belatra — provider-specific runtime adapter, plaintext pre-serialization protocol hook, line-dependent configuration traversal, Buy Bonus option/confirm separation, and HAR-derived `POST /game` transport map; CI DEMO access may be blocked by provider anti-bot.
 
 The repository follows a traffic/state-first rule: UI actions do not need semantic classification before execution. Raw request/response and runtime state are the source of truth.
 
