@@ -727,15 +727,68 @@ export const pragmatic = {
             }
             current = Object.getPrototypeOf(current);
           }
+          const fields = {};
+          for (const field of [
+            'GameID','GameType','GameOver','Level','Life','WheelOfFortune',
+            'justReceived','currentBonusRespin','maxBonusRespins',
+            'numberOfLevels','isBonusGambled','MultiplierStep',
+            'purchaseIndex'
+          ]) {
+            try {
+              const fieldValue = value?.[field];
+              if (
+                fieldValue == null ||
+                ['string','number','boolean'].includes(typeof fieldValue)
+              ) fields[field] = fieldValue ?? null;
+            } catch {}
+          }
+
           return {
             constructor: value?.constructor?.name ?? null,
+            fields,
             keys: keys.slice(0,80),
-            methods: methods.filter(name => /bonus|spin|respin|pick|collect|start|continue|send|request/i.test(name)).slice(0,80)
+            methods: methods.filter(name => /bonus|spin|respin|pick|collect|start|continue|send|request|init/i.test(name)).slice(0,80)
           };
         } catch {
           return null;
         }
       };
+
+      const transportObjects = [];
+      for (const key of Object.keys(globalThis.Vars || {})) {
+        if (!/connection|transport|server|request|bonus/i.test(key)) continue;
+        try {
+          const ref = Vars[key];
+          if (!ref) continue;
+          const value = XT.GetObject(ref);
+          if (!value || typeof value !== 'object') continue;
+
+          const methods = [];
+          let current = value;
+          const seen = new Set();
+          for (let depth = 0; current && depth < 4; depth++) {
+            for (const name of Object.getOwnPropertyNames(current)) {
+              if (seen.has(name)) continue;
+              seen.add(name);
+              try {
+                if (
+                  typeof value[name] === 'function' &&
+                  /bonus|spin|pick|collect|send|request|init/i.test(name)
+                ) methods.push(name);
+              } catch {}
+            }
+            current = Object.getPrototypeOf(current);
+          }
+
+          if (methods.length) {
+            transportObjects.push({
+              varKey: key,
+              constructor: value?.constructor?.name ?? null,
+              methods: [...new Set(methods)].slice(0,80)
+            });
+          }
+        } catch {}
+      }
 
       return {
         canSpin: readBool('CanSpin'),
@@ -753,6 +806,7 @@ export const pragmatic = {
         confirmFSControls,
         confirmFSActive: confirmFSControls.some(item => item.active === true),
         bonusControls,
+        transportObjects: transportObjects.slice(0,40),
         bonusObjects: {
           BonusData: objectSummary('BonusData'),
           RespinData: objectSummary('RespinData'),
