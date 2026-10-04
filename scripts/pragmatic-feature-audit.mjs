@@ -398,13 +398,58 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
         }
       }
 
+      // A purchased free-spin feature often enters an intro/interstitial first.
+      // The server already reports fs>0, but CanSpin remains false until the
+      // runtime receives ConfirmFSStart. Try that canonical event before Spin.
+      const lastNa=String(lastExchange?.na||'').toLowerCase();
+      const lastFs=numberOrNull(lastExchange?.fs);
+      const lastFsMax=numberOrNull(lastExchange?.fsmax);
+
+      if (
+        lastNa==='s' &&
+        lastFs!=null &&
+        lastFs>0 &&
+        snapshot?.canSpin===false
+      ) {
+        const beforeConfirm=responses.length;
+        const press=await executionRuntime.provider.press(frame,'confirm_fs_start').catch(error=>({
+          ok:false,
+          reason:String(error?.message||error)
+        }));
+        const wait=await waitGameplayQuiet(page,responses,{
+          maxMs:3600,
+          quietMs:1100,
+          minMs:350
+        });
+        await Promise.allSettled([...responseTasks]);
+        const fresh=responses.slice(beforeConfirm)
+          .map(parsedExchange)
+          .filter(x=>['doSpin','doBonus','doCollect'].includes(x.action));
+        if (fresh.length) lastExchange=fresh.at(-1);
+        result.steps.push({
+          kind:'protocol-confirm-fs-start',
+          iteration,
+          press,
+          responses:fresh,
+          wait
+        });
+
+        // ConfirmFSStart can either immediately trigger the first continuation
+        // request or just unlock the next Spin. Re-read runtime state either way.
+        const afterConfirmSnapshot=await snapshotState(executionRuntime.provider,frame);
+        if (fresh.length) {
+          lastResponseIndex=responses.length;
+          continue;
+        }
+        if (press?.ok && afterConfirmSnapshot?.canSpin===true) {
+          // Fall through to protocol-spin below.
+        }
+      }
+
       // Protocol-first continuation: Pragmatic may keep the visible Spin
       // control disabled during free spins/respin sequences even though na=s is
       // an explicit instruction to request the next spin. Trigger the canonical
       // spin event directly instead of waiting for a visible button.
-      const lastNa=String(lastExchange?.na||'').toLowerCase();
-      const lastFs=numberOrNull(lastExchange?.fs);
-      const lastFsMax=numberOrNull(lastExchange?.fsmax);
       const protocolSpinActive =
         lastNa==='s' &&
         (
@@ -523,7 +568,18 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
           iteration,
           reason:'no continuation control',
           snapshot,
-          exchange:lastExchange
+          exchange:lastExchange,
+          controls:(await executionRuntime.provider.listControls(frame).catch(()=>[]))
+            .slice(0,120)
+            .map(control=>({
+              kind:control?.kind ?? null,
+              name:control?.name ?? null,
+              event:control?.event ?? null,
+              active:control?.active ?? null,
+              purchaseIndex:control?.purchaseIndex ?? null,
+              optionIndex:control?.optionIndex ?? null,
+              type:control?.type ?? null
+            }))
         };
         break;
       }
