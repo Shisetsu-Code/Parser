@@ -346,9 +346,24 @@ export const genericCanvas = {
         const occurrence = counts.get(key) || 0;
         counts.set(key, occurrence + 1);
 
+        const economicText = [name,text,aria,title].join(' ').toLowerCase();
+        const economicKind =
+          /(buy|purchase|comprar|ante|chance|booster|boost|super.?spin|enhanced.?spin)/i.test(economicText)
+            ? 'purchase'
+            : null;
+        const purchaseSubtype =
+          /ante/i.test(economicText) ? 'ante_bet' :
+          /chance/i.test(economicText) ? 'chance' :
+          /booster|boost/i.test(economicText) ? 'booster' :
+          /super.?spin|enhanced.?spin/i.test(economicText) ? 'super_spin' :
+          /buy|purchase|comprar/i.test(economicText) ? 'buy_feature' :
+          null;
+
         controls.push({
           kind: 'DOM',
           name,
+          economicKind,
+          purchaseSubtype,
           tag,
           text,
           aria: aria || null,
@@ -392,6 +407,36 @@ export const genericCanvas = {
 
       return controls;
     }).catch(() => []);
+  },
+
+  async listEconomicPurchases(frame) {
+    const controls = await this.listControls(frame).catch(() => []);
+    const out = [];
+    const seen = new Set();
+
+    for (const control of controls) {
+      if (control?.economicKind !== 'purchase') continue;
+      const key = [
+        control?.purchaseSubtype ?? 'other_paid_modifier',
+        control?.kind ?? '',
+        control?.name ?? '',
+        control?.occurrence ?? 0
+      ].join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        id: key,
+        economicKind: 'purchase',
+        subtype: control?.purchaseSubtype ?? 'other_paid_modifier',
+        execution: 'runtime_control',
+        available: control?.active !== false,
+        cost: null,
+        control,
+        raw: control
+      });
+    }
+
+    return out;
   },
 
   async pressControl(frame, control) {
