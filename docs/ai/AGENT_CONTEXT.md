@@ -194,6 +194,18 @@ Classification must operate on gameplay protocol requests, not:
 The fact that a control causes network traffic is evidence.
 It is NOT automatically evidence of spin/purchase/bonus.
 
+For every gameplay action edge, persist both directions when available:
+
+```text
+control/action
+  -> request endpoint + sanitized request payload
+  -> response status + sanitized response payload
+  -> provider runtime snapshot
+```
+
+Credential/session material such as `sid`, launch/session tokens and Pragmatic `mgckey` MUST be redacted from persisted evidence. Semantic protocol fields MUST remain intact.
+
+
 ## Evidence labels
 
 OBSERVED:
