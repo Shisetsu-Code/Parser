@@ -664,6 +664,8 @@ export const pragmatic = {
 
       const roots = globalThis.globalRuntime?.sceneRoots || [];
       const pickerControls = [];
+      const confirmFSControls = [];
+      const bonusControls = [];
 
       if (globalThis.XTButton) {
         for (let ri = 0; ri < roots.length; ri++) {
@@ -677,11 +679,7 @@ export const pragmatic = {
               const active = button.gameObject?.activeInHierarchy !== false;
               const text = (name + ' ' + event).toLowerCase();
 
-              if (!/itempicked|bonuspick|fsbgpick|pickitem|select(?:ed)?option|option_\d/i.test(text)) {
-                continue;
-              }
-
-              pickerControls.push({
+              const descriptor = {
                 root: ri,
                 index: bi,
                 name,
@@ -689,11 +687,55 @@ export const pragmatic = {
                 active,
                 canClick: typeof button.OnClick === 'function',
                 canPress: typeof button.OnPress === 'function'
-              });
+              };
+
+              if (/confirmfsstart|evt_datatocode_confirmfsstart/i.test(text)) {
+                confirmFSControls.push(descriptor);
+              }
+
+              if (/itempicked|bonuspick|fsbgpick|pickitem|select(?:ed)?option|option_\d/i.test(text)) {
+                pickerControls.push(descriptor);
+              }
+
+              if (/bonus|respin|continue|collect|confirm/i.test(text)) {
+                bonusControls.push(descriptor);
+              }
             } catch {}
           }
         }
       }
+
+      const objectSummary = key => {
+        try {
+          const ref = Vars[key];
+          if (!ref) return null;
+          const value = XT.GetObject(ref);
+          if (value == null) return null;
+          if (['string','number','boolean'].includes(typeof value)) return value;
+          const methods = [];
+          const keys = [];
+          let current = value;
+          const seen = new Set();
+          for (let depth = 0; current && depth < 4; depth++) {
+            for (const name of Object.getOwnPropertyNames(current)) {
+              if (seen.has(name)) continue;
+              seen.add(name);
+              keys.push(name);
+              try {
+                if (typeof value[name] === 'function') methods.push(name);
+              } catch {}
+            }
+            current = Object.getPrototypeOf(current);
+          }
+          return {
+            constructor: value?.constructor?.name ?? null,
+            keys: keys.slice(0,80),
+            methods: methods.filter(name => /bonus|spin|respin|pick|collect|start|continue|send|request/i.test(name)).slice(0,80)
+          };
+        } catch {
+          return null;
+        }
+      };
 
       return {
         canSpin: readBool('CanSpin'),
@@ -704,7 +746,20 @@ export const pragmatic = {
         spinBlockingFeatureIsRunning: readBool('SpinBlockingFeatureIsRunning'),
         manualRespin: readBool('ManualRespin'),
         respinInProgress: readBool('RespinInProgress'),
-        pickerControls
+        mustOpenBonus: readBool('MustOpenBonus'),
+        instantlyCollectBonus: readBool('InstantlyCollectBonus'),
+        mustOpenAnotherBonus: readBool('MustOpenAnotherBonus'),
+        pickerControls,
+        confirmFSControls,
+        confirmFSActive: confirmFSControls.some(item => item.active === true),
+        bonusControls,
+        bonusObjects: {
+          BonusData: objectSummary('BonusData'),
+          RespinData: objectSummary('RespinData'),
+          BonusRoundsData: objectSummary('BonusRoundsData'),
+          FreeSpinsChainData: objectSummary('FreeSpinsChainData'),
+          InitBonusCode: objectSummary('InitBonusCode')
+        }
       };
     }).catch(() => null);
   },
@@ -715,11 +770,21 @@ export const pragmatic = {
 
     if (na === 'b' || (exchange?.bgid != null && String(exchange?.end ?? '') !== '1')) {
       const choices = (state?.pickerControls || []).filter(item => item.active !== false);
+      if (choices.length) {
+        return {
+          ok: false,
+          needsSelection: true,
+          kind: 'bonus-pick',
+          choices,
+          state
+        };
+      }
+
       return {
         ok: false,
-        needsSelection: true,
-        kind: 'bonus-pick',
-        choices,
+        needsBonusInit: true,
+        kind: 'bonus-init',
+        choices: [],
         state
       };
     }
@@ -771,13 +836,38 @@ export const pragmatic = {
         };
       }
 
-      // The first purchased free-spin result commonly leaves CanSpin=false and
-      // waits for the internal "start free spins" confirmation. Trigger that
-      // canonical event before attempting another spin.
-      if (
-        state?.fsStartNeedsConfirmation === true &&
-        state?.logicIsFreeSpin !== true
-      ) {
+      // If the runtime is already spin-capable, the server response itself has
+      // completed any start-confirmation phase. Use the internal server-request
+      // event directly; do not infer a pending confirmation from the global
+      // FSStartNeedsConfirmation configuration flag.
+      if (state?.canSpin === true) {
+        const spin = await frame.evaluate(() => {
+          try {
+            const event =
+              globalThis.Vars?.Evt_ToServer_RequestSpin ||
+              globalThis.Vars?.Evt_DataToCode_Pressed_Spin;
+            if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
+              return { ok: false, reason: 'Pragmatic spin event unavailable' };
+            }
+            XT.TriggerEvent(event);
+            return {
+              ok: true,
+              kind: 'protocol-spin',
+              strategy:
+                event === Vars.Evt_ToServer_RequestSpin
+                  ? 'XT.TriggerEvent(Vars.Evt_ToServer_RequestSpin)'
+                  : 'XT.TriggerEvent(Vars.Evt_DataToCode_Pressed_Spin)'
+            };
+          } catch (error) {
+            return { ok: false, reason: String(error?.message || error) };
+          }
+        });
+        return { ...spin, state };
+      }
+
+      // Only confirm FS start when an actual active runtime control advertises
+      // that transition. The boolean config by itself is not sufficient.
+      if (state?.confirmFSActive === true) {
         const confirm = await frame.evaluate(() => {
           try {
             const event = globalThis.Vars?.Evt_DataToCode_ConfirmFSStart;
@@ -794,28 +884,16 @@ export const pragmatic = {
             return { ok: false, reason: String(error?.message || error) };
           }
         });
-
-        if (confirm?.ok) return { ...confirm, state };
+        return { ...confirm, state };
       }
 
-      const spin = await frame.evaluate(() => {
-        try {
-          const event = globalThis.Vars?.Evt_DataToCode_Pressed_Spin;
-          if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
-            return { ok: false, reason: 'Evt_DataToCode_Pressed_Spin unavailable' };
-          }
-          XT.TriggerEvent(event);
-          return {
-            ok: true,
-            kind: 'protocol-spin',
-            strategy: 'XT.TriggerEvent(Vars.Evt_DataToCode_Pressed_Spin)'
-          };
-        } catch (error) {
-          return { ok: false, reason: String(error?.message || error) };
-        }
-      });
-
-      return { ...spin, state };
+      return {
+        ok: false,
+        kind: 'feature-wait',
+        waiting: true,
+        reason: 'Feature active but runtime is not yet spin/confirm actionable',
+        state
+      };
     }
 
     return {
