@@ -154,3 +154,57 @@ Example:
 
 Do not classify a paid Ante Bet as configuration merely because it changes spin behavior.
 A free structural setting such as paylines/line-count remains configuration.
+
+
+## Economic purchase taxonomy
+
+Business rule:
+
+**PURCHASE = any paid extra beyond a normal base-game spin.**
+
+This includes, without distinction at the top level:
+- buy bonus / bonus buy;
+- purchased free spins;
+- super bonus / enhanced bonus;
+- purchased respins / hold-and-spin entry;
+- ante bet;
+- booster / chance / feature chance;
+- any other paid modifier that increases the cost of the next cycle relative to a normal spin.
+
+Subtypes are metadata only. They do not change the top-level classification.
+
+Example:
+```ts
+type NormalizedPurchase = {
+  kind: "purchase";
+  subtype:
+    | "free_spins"
+    | "bonus"
+    | "super_bonus"
+    | "respins"
+    | "ante"
+    | "booster"
+    | "chance"
+    | "other";
+  selector?: Record<string, unknown>;
+  baseStake?: number | null;
+  effectiveStake?: number | null;
+  displayedCost?: number | null;
+  multiplier?: number | null;
+  evidence?: {
+    payloadDelta?: Record<string, unknown>;
+    preparedPayload?: unknown;
+    runtime?: unknown;
+  };
+};
+```
+
+A naturally-triggered feature is not a purchase. The same feature becomes a purchase only when the user pays an amount above the normal base spin to activate or improve it.
+
+Preferred evidence order:
+1. prepared/request payload and effective cost;
+2. server-declared purchase/feature configuration;
+3. runtime state/components;
+4. visible name/text only as secondary evidence.
+
+Ante/booster/chance controls must therefore be reported as PURCHASE with a subtype, not as a separate business category.
