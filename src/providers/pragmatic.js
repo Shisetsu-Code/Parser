@@ -328,13 +328,39 @@ export const pragmatic = {
   },
 
   async pressPreBaseSelection(frame, selection) {
-    const picked = await frame.evaluate(({ selection }) => {
+    const inspect = async () => frame.evaluate(() => {
+      const roots = globalThis.globalRuntime?.sceneRoots || [];
+      const pickers = [];
+      if (globalThis.XTButton) {
+        for (let ri = 0; ri < roots.length; ri++) {
+          let buttons = [];
+          try { buttons = roots[ri].GetComponentsInChildren(XTButton, true) || []; } catch {}
+          for (const button of buttons) {
+            try {
+              if (button.gameObject?.activeInHierarchy === false) continue;
+              const name = String(button.gameObject?.name || '');
+              const event = String(button.eventToCode?.name || '');
+              const text = (name + ' ' + event).toLowerCase();
+              if (!/itempickedfsbgpick|fsbgpick|bonuspick|pickitem|itempicked|select(?:ed)?option/i.test(text)) continue;
+              pickers.push({ name, event });
+            } catch {}
+          }
+        }
+      }
+      return {
+        pickerCount: pickers.length,
+        pickers,
+        canSpin: (() => {
+          try { return globalThis.Vars?.CanSpin ? XT.GetBool(Vars.CanSpin) : null; }
+          catch { return null; }
+        })()
+      };
+    }).catch(() => ({ pickerCount: null, pickers: [], canSpin: null }));
+
+    const invoke = async strategy => frame.evaluate(({ selection, strategy }) => {
       try {
         const roots = globalThis.globalRuntime?.sceneRoots || [];
-        if (!globalThis.XTButton) {
-          return { ok:false, reason:'XTButton unavailable' };
-        }
-
+        if (!globalThis.XTButton) return { ok:false, reason:'XTButton unavailable' };
         const root = roots[Number(selection?.root)];
         if (!root) return { ok:false, reason:'selection root unavailable' };
 
@@ -357,87 +383,131 @@ export const pragmatic = {
           matches[Number(selection?.occurrence || 0)] ||
           matches[0];
 
-        if (!target) {
-          return {
-            ok:false,
-            reason:'pre-base selection disappeared',
-            selection
-          };
-        }
+        if (!target) return { ok:false, reason:'pre-base selection disappeared' };
 
-        if (typeof target.OnClick === 'function') {
-          target.OnClick();
-          return {
-            ok:true,
-            strategy:'XTButton.OnClick()',
-            selection
-          };
-        }
-
-        if (typeof target.OnPress === 'function') {
+        if (strategy === 'press') {
+          if (typeof target.OnPress !== 'function') return { ok:false, reason:'OnPress unavailable' };
           target.OnPress(true);
           target.OnPress(false);
+          return { ok:true, strategy:'XTButton.OnPress(true/false)' };
+        }
+
+        if (strategy === 'click') {
+          if (typeof target.OnClick !== 'function') return { ok:false, reason:'OnClick unavailable' };
+          target.OnClick();
+          return { ok:true, strategy:'XTButton.OnClick()' };
+        }
+
+        if (strategy === 'event') {
+          const event = globalThis.Vars?.Evt_DataToCode_ItemPickedFSBGPick;
+          if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
+            return { ok:false, reason:'Evt_DataToCode_ItemPickedFSBGPick unavailable' };
+          }
+
+          const optionIndex = Number(selection?.optionIndex);
+          const possibleIndexVars = [
+            'BonusPickItemIndex',
+            'BonusPickItemIndexLocal',
+            'FSBGPickedOption',
+            'FSBGPickIndex',
+            'SelectedFSBGOption'
+          ];
+
+          const assigned = [];
+          for (const key of possibleIndexVars) {
+            const ref = globalThis.Vars?.[key];
+            if (!ref || !Number.isFinite(optionIndex)) continue;
+            try {
+              if (typeof XT.SetInt === 'function') {
+                XT.SetInt(ref, optionIndex);
+                assigned.push(key + ':int');
+                continue;
+              }
+            } catch {}
+            try {
+              if (typeof XT.SetObject === 'function') {
+                XT.SetObject(ref, optionIndex);
+                assigned.push(key + ':object');
+              }
+            } catch {}
+          }
+
+          XT.TriggerEvent(event);
           return {
             ok:true,
-            strategy:'XTButton.OnPress(true/false)',
-            selection
+            strategy:'XT.TriggerEvent(Vars.Evt_DataToCode_ItemPickedFSBGPick)',
+            optionIndex:Number.isFinite(optionIndex) ? optionIndex : null,
+            assigned
           };
         }
 
-        return {
-          ok:false,
-          reason:'pre-base selection has no invokable method',
-          selection
-        };
+        return { ok:false, reason:'unknown strategy' };
       } catch (error) {
-        return {
-          ok:false,
-          reason:String(error?.message || error),
-          selection
-        };
+        return { ok:false, reason:String(error?.message || error) };
       }
-    }, { selection }).catch(error => ({
-      ok:false,
-      reason:String(error?.message || error),
-      selection
-    }));
-
-    if (!picked?.ok) return picked;
-
-    await frame.page().waitForTimeout(250);
-
-    const finalize = await frame.evaluate(() => {
-      try {
-        const event = globalThis.Vars?.Evt_DataToCode_FSBG_CloseConfirmation;
-        if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
-          return {
-            ok:false,
-            skipped:true,
-            reason:'Evt_DataToCode_FSBG_CloseConfirmation unavailable'
-          };
-        }
-
-        XT.TriggerEvent(event);
-        return {
-          ok:true,
-          strategy:'XT.TriggerEvent(Vars.Evt_DataToCode_FSBG_CloseConfirmation)'
-        };
-      } catch (error) {
-        return {
-          ok:false,
-          reason:String(error?.message || error)
-        };
-      }
-    }).catch(error => ({
+    }, { selection, strategy }).catch(error => ({
       ok:false,
       reason:String(error?.message || error)
     }));
 
-    await frame.page().waitForTimeout(350);
+    const before = await inspect();
+    const attempts = [];
+
+    for (const strategy of ['press', 'click', 'event']) {
+      const action = await invoke(strategy);
+      await frame.page().waitForTimeout(450);
+      const after = await inspect();
+
+      attempts.push({ strategy, action, after });
+
+      const changed =
+        after?.pickerCount === 0 ||
+        after?.canSpin === true ||
+        (
+          Number.isFinite(Number(before?.pickerCount)) &&
+          Number.isFinite(Number(after?.pickerCount)) &&
+          Number(after.pickerCount) < Number(before.pickerCount)
+        );
+
+      if (action?.ok && changed) {
+        // Some FSBG pickers expose a separate close-confirmation transition.
+        const finalize = await frame.evaluate(() => {
+          try {
+            const event = globalThis.Vars?.Evt_DataToCode_FSBG_CloseConfirmation;
+            if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
+              return { ok:false, skipped:true, reason:'FSBG close confirmation unavailable' };
+            }
+            XT.TriggerEvent(event);
+            return {
+              ok:true,
+              strategy:'XT.TriggerEvent(Vars.Evt_DataToCode_FSBG_CloseConfirmation)'
+            };
+          } catch (error) {
+            return { ok:false, reason:String(error?.message || error) };
+          }
+        }).catch(error => ({ ok:false, reason:String(error?.message || error) }));
+
+        await frame.page().waitForTimeout(450);
+
+        return {
+          ok:true,
+          selection,
+          strategy:action.strategy,
+          attempts,
+          finalize,
+          before,
+          after:await inspect()
+        };
+      }
+    }
 
     return {
-      ...picked,
-      finalize
+      ok:false,
+      selection,
+      reason:'pre-base selection did not change picker state',
+      attempts,
+      before,
+      after:await inspect()
     };
   },
 
