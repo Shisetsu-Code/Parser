@@ -99,8 +99,13 @@ function scoreContinuation(control, exchange) {
   }
 
   let score=0;
+
+  if (/(confirmfsstart|confirm.*free.?spin|free.?spin.*confirm|evt_datatocode_confirmfsstart)/i.test(text)) {
+    score+=1000;
+  }
+
   if (responseRequiresInput(exchange)) {
-    if (/(bonus|pick|select|choice|option|o_\d|button\d|confirm)/i.test(text)) score+=700;
+    if (/(bonus|pick|select|choice|option|itempicked|o_\d|button\d|confirm)/i.test(text)) score+=800;
     if (/(continue|start|ok)/i.test(text)) score+=450;
   } else {
     if (/(continue|collect|start|ok)/i.test(text)) score+=500;
