@@ -16,7 +16,7 @@ const games = [
 ];
 
 const targets = games
-  .map(([, url]) => url + ' | tree_all')
+  .map(([, url]) => url + ' | sweep_all')
   .join('\n') + '\n';
 
 const targetFile = 'targets-belatra-sequential.txt';
@@ -26,8 +26,10 @@ console.log('Belatra sequential smoke:');
 console.log('- one Chromium process');
 console.log('- one BrowserContext');
 console.log('- one page');
-console.log('- games and tree branches are navigated strictly one at a time');
+console.log('- games are loaded strictly one at a time');
+console.log('- each game uses an in-place dynamic sweep; no per-branch page reloads');
 console.log('- Cloudflare clearance is preserved in the shared context');
+console.log('- Belatra runtime loss stops that game instead of forcing a reload/new sid');
 console.log('- if a challenge appears, solve it in the visible browser; Parser waits for runtime');
 
 const child = spawn(process.execPath, [
