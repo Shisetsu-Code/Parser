@@ -278,6 +278,131 @@ export const pragmatic = {
     };
   },
 
+  async listPreBaseSelections(frame) {
+    return frame.evaluate(() => {
+      const roots = globalThis.globalRuntime?.sceneRoots || [];
+      if (!globalThis.XTButton) return [];
+
+      const out = [];
+      const seen = new Map();
+
+      for (let ri = 0; ri < roots.length; ri++) {
+        let buttons = [];
+        try { buttons = roots[ri].GetComponentsInChildren(XTButton, true) || []; } catch {}
+
+        for (const button of buttons) {
+          try {
+            if (button.gameObject?.activeInHierarchy === false) continue;
+
+            const name = String(button.gameObject?.name || '');
+            const event = String(button.eventToCode?.name || '');
+            const text = (name + ' ' + event).toLowerCase();
+
+            if (!/itempickedfsbgpick|fsbgpick|bonuspick|pickitem|itempicked|select(?:ed)?option/i.test(text)) {
+              continue;
+            }
+
+            const key = name + '|' + event;
+            const occurrence = seen.get(key) || 0;
+            seen.set(key, occurrence + 1);
+
+            const optionMatch = name.match(/(?:option|button|item)[_\s-]?(\d+)/i);
+
+            out.push({
+              kind: 'PRAGMATIC_PREBASE_PICK',
+              root: ri,
+              name,
+              event,
+              occurrence,
+              optionIndex: optionMatch ? Number(optionMatch[1]) - 1 : null,
+              active: true,
+              canClick: typeof button.OnClick === 'function',
+              canPress: typeof button.OnPress === 'function'
+            });
+          } catch {}
+        }
+      }
+
+      return out;
+    }).catch(() => []);
+  },
+
+  async pressPreBaseSelection(frame, selection) {
+    return frame.evaluate(({ selection }) => {
+      try {
+        const roots = globalThis.globalRuntime?.sceneRoots || [];
+        if (!globalThis.XTButton) {
+          return { ok:false, reason:'XTButton unavailable' };
+        }
+
+        const root = roots[Number(selection?.root)];
+        if (!root) return { ok:false, reason:'selection root unavailable' };
+
+        let buttons = [];
+        try { buttons = root.GetComponentsInChildren(XTButton, true) || []; } catch {}
+
+        const matches = buttons.filter(button => {
+          try {
+            if (button.gameObject?.activeInHierarchy === false) return false;
+            return (
+              String(button.gameObject?.name || '') === String(selection?.name || '') &&
+              String(button.eventToCode?.name || '') === String(selection?.event || '')
+            );
+          } catch {
+            return false;
+          }
+        });
+
+        const target =
+          matches[Number(selection?.occurrence || 0)] ||
+          matches[0];
+
+        if (!target) {
+          return {
+            ok:false,
+            reason:'pre-base selection disappeared',
+            selection
+          };
+        }
+
+        if (typeof target.OnClick === 'function') {
+          target.OnClick();
+          return {
+            ok:true,
+            strategy:'XTButton.OnClick()',
+            selection
+          };
+        }
+
+        if (typeof target.OnPress === 'function') {
+          target.OnPress(true);
+          target.OnPress(false);
+          return {
+            ok:true,
+            strategy:'XTButton.OnPress(true/false)',
+            selection
+          };
+        }
+
+        return {
+          ok:false,
+          reason:'pre-base selection has no invokable method',
+          selection
+        };
+      } catch (error) {
+        return {
+          ok:false,
+          reason:String(error?.message || error),
+          selection
+        };
+      }
+    }, { selection }).catch(error => ({
+      ok:false,
+      reason:String(error?.message || error),
+      selection
+    }));
+  },
+
   async stateSnapshot(frame) {
     return frame.evaluate(() => {
       if (!window.XT || !window.Vars) return null;
