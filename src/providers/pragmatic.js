@@ -613,11 +613,25 @@ export const pragmatic = {
             const key = String(name || '') + '|' + String(event || '');
             const occurrence = seen.get(key) || 0;
             seen.set(key, occurrence + 1);
+            const economicText = (String(name || '') + ' ' + String(event || '')).toLowerCase();
+            const economicKind =
+              /(buy|purchase|ante|booster|chance|feature.?bet|extra.?bet)/i.test(economicText)
+                ? 'purchase'
+                : null;
+            const purchaseSubtype =
+              /ante/i.test(economicText) ? 'ante' :
+              /booster/i.test(economicText) ? 'booster' :
+              /chance|feature.?bet|extra.?bet/i.test(economicText) ? 'chance' :
+              /(buy|purchase)/i.test(economicText) ? 'bonus' :
+              null;
+
             controls.push({
               kind: 'XTButton',
               root: ri,
               name,
               event,
+              economicKind,
+              purchaseSubtype,
               occurrence,
               active,
               canPress: typeof b.OnPress === 'function',
@@ -1767,6 +1781,8 @@ export const pragmatic = {
                 kind: 'FeaturePurchaseOption',
                 root: ri,
                 name,
+                economicKind: 'purchase',
+                purchaseSubtype: 'bonus',
                 active,
                 purchaseIndex,
                 type,
@@ -1780,6 +1796,8 @@ export const pragmatic = {
                 kind: 'FeaturePurchaseMethod',
                 root: ri,
                 name,
+                economicKind: 'purchase',
+                purchaseSubtype: 'bonus',
                 active,
                 purchaseIndex,
                 type,
@@ -1808,6 +1826,8 @@ export const pragmatic = {
                   kind: 'FeaturePurchaseV2Option',
                   root: ri,
                   name,
+                  economicKind: 'purchase',
+                  purchaseSubtype: 'bonus',
                   active,
                   optionIndex,
                   methods
