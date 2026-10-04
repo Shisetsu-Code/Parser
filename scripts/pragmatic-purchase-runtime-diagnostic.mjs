@@ -10,6 +10,40 @@ const CASES = [
   ['Wild Beach Party','wild-beach-party',0]
 ];
 
+
+function parsePurInit(text){
+  if(!text) return {count:0,options:[]};
+  const params=new URLSearchParams(text);
+  const raw=params.get('purInit');
+  if(raw==null) return {count:0,options:[]};
+  let decoded=raw;
+  try{decoded=decodeURIComponent(raw)}catch{}
+  let parsed=null;
+  try{parsed=JSON.parse(decoded)}catch{}
+  let options=[];
+  if(Array.isArray(parsed)) options=parsed;
+  else if(parsed&&Array.isArray(parsed.options)) options=parsed.options;
+  else options=(decoded.match(/\{[^{}]*\}/g)||[]).map((x,i)=>({index:i,raw:x}));
+  return {count:options.length,options};
+}
+
+function attachPurInit(page){
+  const handler=async response=>{
+    try{
+      const req=response.request();
+      const post=req.postData()||'';
+      if(!/gameService/i.test(response.url())) return;
+      if(!/(?:^|&)action=doInit(?:&|$)/.test(post)) return;
+      const parsed=parsePurInit(await response.text());
+      await req.frame().evaluate(value=>{
+        globalThis.__parserPragmaticPurInit=value;
+      },parsed).catch(()=>{});
+    }catch{}
+  };
+  page.on('response',handler);
+  return handler;
+}
+
 const urlFor = slug =>
   'https://www.pragmaticplay.com/en/games/' + slug + '/?cur=USD&gamelang=en';
 
@@ -175,6 +209,7 @@ const results=[];
 for (const [name,slug,index] of CASES) {
   const context=await browser.newContext({viewport:{width:1440,height:900}});
   const page=await context.newPage();
+  const purInitHandler=attachPurInit(page);
   const row={name,slug,index,error:null,before:null,options:null,press:null,after:null,afterWait:null};
 
   try {
@@ -204,6 +239,7 @@ for (const [name,slug,index] of CASES) {
     console.log('  ERROR '+String(error?.message||error));
   } finally {
     results.push(row);
+    page.off('response',purInitHandler);
     await context.close();
   }
 }
