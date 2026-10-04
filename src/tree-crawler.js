@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { bootstrapSupportedPage, findRuntime } from './providers/index.js';
-import { summarizeRequest } from './lib/common.js';
+import { summarizeRequest, summarizeResponse } from './lib/common.js';
 
 function replayDescriptor(control) {
   return {
@@ -135,6 +135,39 @@ function sortControls(controls, snapshot = null) {
     if (p) return p;
     return stateControlKey(a).localeCompare(stateControlKey(b));
   });
+}
+
+function isGameplayResponse(response) {
+  try {
+    const request = response.request();
+    const url = response.url();
+    const post = request.postData() || '';
+    return (
+      /gameService|\/gs2c\/|\/game(?:$|\?)|\/api(?:\/|$)|spin|bonus|feature|purchase/i.test(url) ||
+      /(?:^|[&?{,\s])(action|command|pur|purchased_feature|bet|q)[=:"']/i.test(post) ||
+      request.method() !== 'GET' && /demo\.|pragmatic|bgaming|bltrm|3oaks/i.test(url)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function attachResponseCapture(page, responses, tasks) {
+  const handler = response => {
+    if (!isGameplayResponse(response)) return;
+    const task = summarizeResponse(response)
+      .then(summary => responses.push(summary))
+      .catch(() => {})
+      .finally(() => tasks.delete(task));
+    tasks.add(task);
+  };
+  page.on('response', handler);
+  return handler;
+}
+
+async function flushResponseTasks(tasks) {
+  if (!tasks?.size) return;
+  await Promise.allSettled([...tasks]);
 }
 
 function trafficSignature(requests) {
@@ -409,8 +442,11 @@ async function openAtPath(browser, url, expectedProvider, path, options, sharedS
   const context = sharedSession?.context ?? await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = sharedSession?.page ?? await context.newPage();
   const network = [];
+  const responses = [];
+  const responseTasks = new Set();
   const replay = [];
   const onRequest = req => network.push(summarizeRequest(req));
+  const onResponse = attachResponseCapture(page, responses, responseTasks);
 
   page.on('request', onRequest);
 
@@ -435,6 +471,7 @@ async function openAtPath(browser, url, expectedProvider, path, options, sharedS
       const step = path[i];
       await waitForControl(runtime.provider, runtime.frame, page, step, Math.min(options.timeoutMs, 3500));
       const before = network.length;
+      const beforeResponses = responses.length;
       const protocolBefore = await readProtocolCursor(runtime.provider, runtime.frame);
       let press;
       try {
@@ -444,13 +481,17 @@ async function openAtPath(browser, url, expectedProvider, path, options, sharedS
       }
 
       await page.waitForTimeout(actionDelay(options));
+      await flushResponseTasks(responseTasks);
       const delta = network.slice(before);
+      const responseDelta = responses.slice(beforeResponses);
       const protocol = await readProtocolEvents(runtime.provider, runtime.frame, protocolBefore);
       replay.push({
         index: i,
         control: step,
         press,
         traffic: trafficSignature(delta),
+        network: delta,
+        responses: responseDelta,
         protocol
       });
 
@@ -465,9 +506,23 @@ async function openAtPath(browser, url, expectedProvider, path, options, sharedS
       await observeControls(runtime.provider, runtime.frame, page, Math.min(options.timeoutMs, 2500));
     }
 
-    return { context, page, network, replay, ownsContext, onRequest, ...runtime };
+    await flushResponseTasks(responseTasks);
+    return {
+      context,
+      page,
+      network,
+      responses,
+      responseTasks,
+      replay,
+      ownsContext,
+      onRequest,
+      onResponse,
+      ...runtime
+    };
   } catch (error) {
+    await flushResponseTasks(responseTasks);
     try { page.off('request', onRequest); } catch {}
+    try { page.off('response', onResponse); } catch {}
     if (ownsContext) await context.close();
     throw error;
   }
@@ -475,7 +530,9 @@ async function openAtPath(browser, url, expectedProvider, path, options, sharedS
 
 async function disposeTreeSession(session) {
   if (!session) return;
+  await flushResponseTasks(session.responseTasks);
   try { session.page?.off('request', session.onRequest); } catch {}
+  try { session.page?.off('response', session.onResponse); } catch {}
   if (session.ownsContext) {
     await session.context.close().catch(() => {});
   }
@@ -605,6 +662,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options, sh
       }
 
       const before = edgeSession.network.length;
+      const beforeResponses = edgeSession.responses?.length ?? 0;
       const protocolBefore = await readProtocolCursor(edgeSession.provider, edgeSession.frame);
       const started = Date.now();
       let press;
@@ -662,6 +720,9 @@ export async function runTreeCrawler(browser, url, expectedProvider, options, sh
           protocolBefore
         );
       }
+
+      await flushResponseTasks(edgeSession.responseTasks);
+      const responseDelta = (edgeSession.responses || []).slice(beforeResponses);
 
       const continuations = [];
       const featureContext =
@@ -771,6 +832,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options, sh
         traffic,
         protocol,
         network: delta,
+        responses: responseDelta,
         terminal: !childRuntime,
         toSignature: childSignature,
         childControlsCount,
