@@ -2,6 +2,13 @@ import { normalizeAction } from '../lib/common.js';
 
 const EVENT_MAP = {
   spin: 'Evt_DataToCode_Pressed_Spin',
+  confirm_fs_start: 'Evt_DataToCode_ConfirmFSStart',
+  bonus_rounds_on_continue_pressed: 'Evt_DataToCode_BonusRoundsOnContinuePressed',
+  intro_close_pressed: 'Evt_DataToCode_IntroClosePressed',
+  free_spins_window_win_collect_pressed: 'Evt_DataToCode_FreeSpinsWindowWinCollectPressed',
+  free_spins_window_lose_collect_pressed: 'Evt_DataToCode_FreeSpinsWindowLoseCollectPressed',
+  bonus_result_collect: 'Evt_DataToCode_BonusResultWindow_PressedCollect',
+  bonus_pick_item: 'Evt_DataToCode_Pressed_BonusPickItem',
   bet_inc: 'Evt_DataToCode_SmartIncreaseBet',
   bet_increase: 'Evt_DataToCode_SmartIncreaseBet',
   bet_dec: 'Evt_DataToCode_SmartDecreaseBet',
