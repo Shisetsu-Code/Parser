@@ -62,11 +62,12 @@ For each HAR:
 4. group requests by endpoint/schema
 5. parse request bodies
 6. parse response bodies
-7. locate changing round/state tokens
-8. locate purchase selectors
-9. locate continuation markers
-10. locate terminal markers
-11. compare multiple games before declaring provider-wide semantics
+7. preserve action-correlated request endpoint + sanitized request payload + response payload
+8. locate changing round/state tokens
+9. locate purchase selectors
+10. locate continuation markers
+11. locate terminal markers
+12. compare multiple games before declaring provider-wide semantics
 
 Output:
 - protocol family
@@ -151,6 +152,8 @@ else:
 ```
 
 Never send a second pick while previous result is pending.
+
+Persist both request and response payloads for gameplay transports whenever response bodies are available. Redact reusable session/credential fields but keep semantic protocol keys such as action, command, pur/puri, ind, bgid, na, fs/fsmax, end, available_actions, final and provider state tokens needed for same-session replay.
 
 ## Selection and submit are separate
 
