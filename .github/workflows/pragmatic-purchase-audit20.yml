@@ -1,0 +1,36 @@
+name: Pragmatic purchase audit 20
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/pragmatic-purchase-audit.mjs"
+      - ".github/workflows/pragmatic-purchase-audit20.yml"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Run Pragmatic purchase audit
+        run: npm run pragmatic:audit20
+      - name: Print compact audit
+        if: always()
+        run: |
+          if [ -f results/pragmatic-purchase-audit.json ]; then
+            node -e "const x=require('./results/pragmatic-purchase-audit.json'); for(const r of x.results){console.log([r.index,r.name,'parser='+r.parserCount,'server='+(r.server?.count ?? '-'),'runtime='+(r.runtime?.optionCount ?? '-')+'/v2:'+(r.runtime?.v2Count ?? '-')+'/mgr:'+(r.runtime?.managerCount ?? '-'),'verdict='+r.verdict,'err='+(r.error?String(r.error).split('\n')[0]:'-')].join(' | '))}; console.log('SUMMARY',x.pass,x.mismatch,x.errors)"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pragmatic-purchase-audit20
+          path: results/pragmatic-purchase-audit.json
+          if-no-files-found: warn
+          retention-days: 7
