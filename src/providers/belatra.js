@@ -119,6 +119,63 @@ async function runtimeInfo(frame) {
         ? Number(game.justBuyBonusSelectType)
         : null;
 
+      const propertyNames = object => {
+        const names = new Set();
+        let current = object;
+        for (let depth = 0; current && depth < 4; depth++) {
+          for (const name of Object.getOwnPropertyNames(current)) names.add(name);
+          current = Object.getPrototypeOf(current);
+        }
+        return [...names];
+      };
+
+      const semanticRuntimeActions = [];
+      for (const [sourceName, object] of [['game', game], ['panelBot', game.panelBot]]) {
+        if (!object || typeof object !== 'object') continue;
+        for (const name of propertyNames(object)) {
+          if (!/(buy|bonus|ante|chance|spin|start)/i.test(name)) continue;
+          if (/^(constructor|show_BuyBonusBanner)$/i.test(name)) continue;
+
+          let value;
+          try { value = object[name]; } catch { continue; }
+
+          const classify = text => {
+            const lower = String(text || '').toLowerCase();
+            if (/(ante|chance)/.test(lower)) return 'ante';
+            if (/(buy.*bonus|bonus.*buy|purchase)/.test(lower)) return 'buy';
+            if (/(spin|start)/.test(lower)) return 'spin';
+            if (/bonus/.test(lower)) return 'bonus';
+            return 'unknown';
+          };
+
+          if (typeof value === 'function') {
+            const semantic = classify(name);
+            if (semantic !== 'unknown') {
+              semanticRuntimeActions.push({
+                source: sourceName,
+                name,
+                method: null,
+                semantic
+              });
+            }
+            continue;
+          }
+
+          if (!value || typeof value !== 'object') continue;
+          for (const method of ['doAction', 'onDown', 'onClick', 'click']) {
+            if (typeof value[method] !== 'function') continue;
+            const semantic = classify(name + ' ' + method);
+            if (semantic === 'unknown') continue;
+            semanticRuntimeActions.push({
+              source: sourceName,
+              name,
+              method,
+              semantic
+            });
+          }
+        }
+      }
+
       return {
         runtimeVersion: 'all_content-webpack',
         moduleIds: MODULES,
@@ -129,6 +186,10 @@ async function runtimeInfo(frame) {
           betPerLine: simple(gs.betPerLine),
           betPerGame: simple(gs.betPerGame),
           betAssortment: Array.isArray(gs.betAssortment) ? gs.betAssortment.slice(0, 100) : []
+        },
+        capabilities: {
+          showBuyBonusBanner: typeof game.show_BuyBonusBanner === 'function',
+          semanticRuntimeActions: semanticRuntimeActions.slice(0, 80)
         },
         purchase: {
           selectedOption: selectedBuy,
@@ -250,6 +311,36 @@ export const belatra = {
     }
 
     const purchase = info.purchase || {};
+    const capabilities = info.capabilities || {};
+
+    if (
+      capabilities.showBuyBonusBanner === true &&
+      !purchase.bannerOpen
+    ) {
+      extra.push({
+        kind: 'BELATRA_BUY_OPEN',
+        name: 'buy_bonus_open',
+        active: true
+      });
+    }
+
+    for (const action of Array.isArray(capabilities.semanticRuntimeActions)
+      ? capabilities.semanticRuntimeActions
+      : []) {
+      // Keep explicit Buy Bonus opener separate and avoid duplicate low-level start/spin
+      // actions when we already know q=start from protocol correlation.
+      if (/show_BuyBonusBanner/i.test(action?.name || '')) continue;
+      extra.push({
+        kind: 'BELATRA_RUNTIME_ACTION',
+        name: `runtime_${action.semantic}_${action.source}_${action.name}`,
+        runtimeSource: action.source,
+        runtimeName: action.name,
+        runtimeMethod: action.method ?? null,
+        semantic: action.semantic,
+        active: true
+      });
+    }
+
     if (purchase.bannerOpen && Number(purchase.optionCount) > 0) {
       for (let index = 0; index < Number(purchase.optionCount); index++) {
         extra.push(buyControl(index, purchase.selectedOption));
@@ -277,6 +368,67 @@ export const belatra = {
 
   async pressControl(frame, control) {
     await ensureHook(frame);
+
+    if (control?.kind === 'BELATRA_BUY_OPEN') {
+      return frame.evaluate(({ MODULES }) => {
+        try {
+          const unitmng = globalThis.all_content(MODULES.unitmng)?.unitmng;
+          const game = unitmng?.tGame;
+          if (!game || typeof game.show_BuyBonusBanner !== 'function') {
+            return { ok: false, reason: 'Buy Bonus opener unavailable' };
+          }
+
+          const banner = game.show_BuyBonusBanner();
+          if (banner) globalThis.__parserBelatraBuyBanner = banner;
+
+          return {
+            ok: true,
+            strategy: 'unitmng.tGame.show_BuyBonusBanner',
+            bannerCaptured: Boolean(globalThis.__parserBelatraBuyBanner)
+          };
+        } catch (error) {
+          return { ok: false, reason: String(error?.message || error) };
+        }
+      }, { MODULES });
+    }
+
+    if (control?.kind === 'BELATRA_RUNTIME_ACTION') {
+      return frame.evaluate(({ MODULES, control }) => {
+        try {
+          const unitmng = globalThis.all_content(MODULES.unitmng)?.unitmng;
+          const game = unitmng?.tGame;
+          const source =
+            control.runtimeSource === 'panelBot'
+              ? game?.panelBot
+              : game;
+          if (!source) return { ok: false, reason: 'Runtime action source unavailable' };
+
+          const target = source[control.runtimeName];
+          if (control.runtimeMethod) {
+            if (!target || typeof target[control.runtimeMethod] !== 'function') {
+              return { ok: false, reason: 'Runtime action method unavailable' };
+            }
+            target[control.runtimeMethod]();
+          } else {
+            if (typeof target !== 'function') {
+              return { ok: false, reason: 'Runtime action function unavailable' };
+            }
+            target.call(source);
+          }
+
+          return {
+            ok: true,
+            strategy: 'Belatra runtime semantic action',
+            semantic: control.semantic,
+            runtimeSource: control.runtimeSource,
+            runtimeName: control.runtimeName,
+            runtimeMethod: control.runtimeMethod ?? null
+          };
+        } catch (error) {
+          return { ok: false, reason: String(error?.message || error) };
+        }
+      }, { MODULES, control });
+    }
 
     if (control?.kind === 'BELATRA_CONFIG' && control?.configKey === 'nlines') {
       return frame.evaluate(async ({ MODULES, target }) => {
