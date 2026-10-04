@@ -133,7 +133,7 @@ async function runtimeInfo(frame) {
       for (const [sourceName, object] of [['game', game], ['panelBot', game.panelBot]]) {
         if (!object || typeof object !== 'object') continue;
         for (const name of propertyNames(object)) {
-          if (!/(buy|bonus|ante|chance|spin|start)/i.test(name)) continue;
+          if (!/(buy|bonus|ante|chance|boost|super.?spin|enhanced.?spin|spin|start)/i.test(name)) continue;
           if (/^(constructor|show_BuyBonusBanner)$/i.test(name)) continue;
 
           let value;
@@ -141,7 +141,10 @@ async function runtimeInfo(frame) {
 
           const classify = text => {
             const lower = String(text || '').toLowerCase();
-            if (/(ante|chance)/.test(lower)) return 'ante';
+            if (/ante/.test(lower)) return 'ante';
+            if (/chance/.test(lower)) return 'chance';
+            if (/boost/.test(lower)) return 'booster';
+            if (/super.?spin|enhanced.?spin/.test(lower)) return 'super_spin';
             if (/(buy.*bonus|bonus.*buy|purchase)/.test(lower)) return 'buy';
             if (/(spin|start)/.test(lower)) return 'spin';
             if (/bonus/.test(lower)) return 'bonus';
@@ -225,7 +228,7 @@ function buyControl(index, selected) {
     kind: 'BELATRA_BUY_OPTION',
     name: `buy_option_${index}`,
     economicKind: 'purchase',
-    purchaseSubtype: 'bonus',
+    purchaseSubtype: 'buy_feature',
     optionIndex: index,
     active: true,
     state: { selected: selected === index }
@@ -341,8 +344,14 @@ export const belatra = {
         runtimeName: action.name,
         runtimeMethod: action.method ?? null,
         semantic: action.semantic,
-        economicKind: ['buy','ante'].includes(action.semantic) ? 'purchase' : null,
-        purchaseSubtype: action.semantic === 'ante' ? 'ante' : (action.semantic === 'buy' ? 'bonus' : null),
+        economicKind: ['buy','ante','chance','booster','super_spin'].includes(action.semantic) ? 'purchase' : null,
+        purchaseSubtype:
+          action.semantic === 'ante' ? 'ante_bet' :
+          action.semantic === 'buy' ? 'buy_feature' :
+          action.semantic === 'chance' ? 'chance' :
+          action.semantic === 'booster' ? 'booster' :
+          action.semantic === 'super_spin' ? 'super_spin' :
+          null,
         active: true
       });
     }
@@ -370,6 +379,45 @@ export const belatra = {
 
     // Prefer exact runtime controls over generic canvas fallbacks.
     return [...extra, ...base];
+  },
+
+  async listEconomicPurchases(frame) {
+    const controls = await this.listControls(frame).catch(() => []);
+    const out = [];
+    const seen = new Set();
+
+    for (const control of controls) {
+      if (control?.economicKind !== 'purchase') continue;
+      const subtype = String(control?.purchaseSubtype || 'other_paid_modifier');
+      const key = [
+        subtype,
+        control?.kind ?? '',
+        control?.name ?? '',
+        control?.optionIndex ?? '',
+        control?.runtimeSource ?? '',
+        control?.runtimeName ?? '',
+        control?.runtimeMethod ?? ''
+      ].join('|');
+
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      out.push({
+        id: key,
+        economicKind: 'purchase',
+        subtype,
+        execution:
+          control?.kind === 'BELATRA_BUY_OPTION'
+            ? 'buy_option'
+            : 'runtime_control',
+        available: control?.active !== false,
+        cost: control?.state?.price ?? null,
+        control,
+        raw: control
+      });
+    }
+
+    return out;
   },
 
   async pressControl(frame, control) {
