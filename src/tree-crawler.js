@@ -24,7 +24,10 @@ function replayDescriptor(control) {
 function stateControlKey(control) {
   const runtimeState = {};
   if (control?.state && typeof control.state === 'object') {
-    for (const key of ['visible', 'disabled', 'selected', 'state', 'text', 'price']) {
+    for (const key of [
+      'visible','disabled','enabled','selected','state','text',
+      'price','cost','multiplier','value','mode'
+    ]) {
       const value = control.state[key];
       if (value == null || ['string', 'number', 'boolean'].includes(typeof value)) {
         runtimeState[key] = value ?? null;
