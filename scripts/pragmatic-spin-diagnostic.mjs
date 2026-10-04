@@ -17,10 +17,32 @@ async function runCase(browser, strategy) {
   };
   const onResponse=res=>{
     if (!/gameService/i.test(res.url())) return;
-    const task=summarizeResponse(res)
-      .then(x=>responses.push(x))
-      .catch(()=>{})
-      .finally(()=>tasks.delete(task));
+    const task=(async()=>{
+      const x=await summarizeResponse(res);
+      responses.push(x);
+
+      const requestParams=new URLSearchParams(x.requestPostData||'');
+      if (requestParams.get('action')==='doInit') {
+        const body=new URLSearchParams(x.body||'');
+        const raw=body.get('purInit');
+        let options=[];
+        if (raw!=null) {
+          let decoded=raw;
+          try{decoded=decodeURIComponent(raw);}catch{}
+          try{
+            const parsed=JSON.parse(decoded);
+            if(Array.isArray(parsed)) options=parsed;
+            else if(parsed && Array.isArray(parsed.options)) options=parsed.options;
+          }catch{
+            options=(decoded.match(/\{[^{}]*\}/g)||[]).map((value,index)=>({index,raw:value}));
+          }
+        }
+        const value={count:raw==null?0:options.length,options};
+        await res.request().frame().evaluate(v=>{
+          globalThis.__parserPragmaticPurInit=v;
+        },value).catch(()=>{});
+      }
+    })().catch(()=>{}).finally(()=>tasks.delete(task));
     tasks.add(task);
   };
   page.on('request',onRequest);
