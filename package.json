@@ -16,7 +16,8 @@
     "pragmatic:feature-audit": "node scripts/pragmatic-feature-audit.mjs",
     "pragmatic:spin-diagnostic": "node scripts/pragmatic-spin-diagnostic.mjs",
     "pragmatic:purchase-diagnostic": "node scripts/pragmatic-purchase-runtime-diagnostic.mjs",
-    "pragmatic:direct-purchase-spin-test": "node scripts/pragmatic-direct-purchase-spin-test.mjs"
+    "pragmatic:direct-purchase-spin-test": "node scripts/pragmatic-direct-purchase-spin-test.mjs",
+    "pragmatic:protocol-smoke": "node scripts/pragmatic-protocol-continuation-smoke.mjs"
   },
   "dependencies": {
     "playwright": "^1.55.0"
