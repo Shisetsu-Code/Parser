@@ -404,13 +404,15 @@ async function settleAutomaticActivity(page, network, expectedProvider, options,
   };
 }
 
-async function openAtPath(browser, url, expectedProvider, path, options) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = await context.newPage();
+async function openAtPath(browser, url, expectedProvider, path, options, sharedSession = null) {
+  const ownsContext = !sharedSession;
+  const context = sharedSession?.context ?? await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = sharedSession?.page ?? await context.newPage();
   const network = [];
   const replay = [];
+  const onRequest = req => network.push(summarizeRequest(req));
 
-  page.on('request', req => network.push(summarizeRequest(req)));
+  page.on('request', onRequest);
 
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
@@ -463,14 +465,23 @@ async function openAtPath(browser, url, expectedProvider, path, options) {
       await observeControls(runtime.provider, runtime.frame, page, Math.min(options.timeoutMs, 2500));
     }
 
-    return { context, page, network, replay, ...runtime };
+    return { context, page, network, replay, ownsContext, onRequest, ...runtime };
   } catch (error) {
-    await context.close();
+    try { page.off('request', onRequest); } catch {}
+    if (ownsContext) await context.close();
     throw error;
   }
 }
 
-export async function runTreeCrawler(browser, url, expectedProvider, options) {
+async function disposeTreeSession(session) {
+  if (!session) return;
+  try { session.page?.off('request', session.onRequest); } catch {}
+  if (session.ownsContext) {
+    await session.context.close().catch(() => {});
+  }
+}
+
+export async function runTreeCrawler(browser, url, expectedProvider, options, sharedSession = null) {
   const maxDepth = Math.max(1, Number(options.treeMaxDepth) || 4);
   const maxStates = Math.max(1, Number(options.treeMaxStates) || 60);
   const maxEdges = Math.max(1, Number(options.treeMaxEdges) || 200);
@@ -479,6 +490,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
 
   const tree = {
     provider: expectedProvider,
+    sessionMode: sharedSession ? 'shared-context-page' : 'fresh-context-per-branch',
     limits: {
       maxDepth,
       maxStates,
@@ -508,7 +520,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
     let stateSession;
 
     try {
-      stateSession = await openAtPath(browser, url, expectedProvider, queued.path, options);
+      stateSession = await openAtPath(browser, url, expectedProvider, queued.path, options, sharedSession);
       tree.stats.openedSessions++;
     } catch (error) {
       tree.stats.replayFailures++;
@@ -531,7 +543,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
         path: queued.path,
         error: String(error?.message || error)
       });
-      await stateSession.context.close();
+      await disposeTreeSession(stateSession);
       continue;
     }
 
@@ -541,7 +553,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
 
     if (seenStates.has(signature)) {
       tree.stats.dedupedStates++;
-      await stateSession.context.close();
+      await disposeTreeSession(stateSession);
       continue;
     }
 
@@ -567,7 +579,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
       ' hash=' + signature
     );
 
-    await stateSession.context.close();
+    await disposeTreeSession(stateSession);
 
     if (queued.depth >= maxDepth) continue;
 
@@ -578,7 +590,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
       let edgeSession;
 
       try {
-        edgeSession = await openAtPath(browser, url, expectedProvider, queued.path, options);
+        edgeSession = await openAtPath(browser, url, expectedProvider, queued.path, options, sharedSession);
         tree.stats.openedSessions++;
       } catch (error) {
         tree.stats.replayFailures++;
@@ -817,7 +829,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
         });
       }
 
-      await edgeSession.context.close();
+      await disposeTreeSession(edgeSession);
     }
   }
 
