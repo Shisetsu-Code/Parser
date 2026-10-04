@@ -224,6 +224,8 @@ function buyControl(index, selected) {
   return {
     kind: 'BELATRA_BUY_OPTION',
     name: `buy_option_${index}`,
+    economicKind: 'purchase',
+    purchaseSubtype: 'bonus',
     optionIndex: index,
     active: true,
     state: { selected: selected === index }
@@ -320,6 +322,8 @@ export const belatra = {
       extra.push({
         kind: 'BELATRA_BUY_OPEN',
         name: 'buy_bonus_open',
+        economicKind: 'purchase',
+        purchaseSubtype: 'bonus',
         active: true
       });
     }
@@ -337,6 +341,8 @@ export const belatra = {
         runtimeName: action.name,
         runtimeMethod: action.method ?? null,
         semantic: action.semantic,
+        economicKind: ['buy','ante'].includes(action.semantic) ? 'purchase' : null,
+        purchaseSubtype: action.semantic === 'ante' ? 'ante' : (action.semantic === 'buy' ? 'bonus' : null),
         active: true
       });
     }
