@@ -272,7 +272,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
       result.steps.push({kind:'purchase-spin-fallback',press:spin});
     }
 
-    await waitGameplayQuiet(page,responses,{maxMs:16000,quietMs:2200,minMs:700});
+    await waitGameplayQuiet(page,responses,{maxMs:9000,quietMs:1500,minMs:600});
     await Promise.allSettled([...responseTasks]);
 
     newRequests=requests.slice(requestBase);
@@ -303,7 +303,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
     let lastExchange=exchanges.at(-1) || null;
     const seenControls=new Set();
 
-    for (let iteration=0; iteration<40; iteration++) {
+    for (let iteration=0; iteration<8; iteration++) {
       await Promise.allSettled([...responseTasks]);
 
       const snapshot=await snapshotState(provider,frame);
@@ -312,8 +312,8 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
         // Give automatic feature activity one final chance before declaring terminal.
         const before=responses.length;
         const quiet=await waitGameplayQuiet(page,responses,{
-          maxMs:3200,
-          quietMs:1800,
+          maxMs:2200,
+          quietMs:1200,
           minMs:500
         });
         await Promise.allSettled([...responseTasks]);
@@ -334,8 +334,8 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
       // Observe automatic progression before pressing anything.
       const beforeAuto=responses.length;
       const auto=await waitGameplayQuiet(page,responses,{
-        maxMs:5000,
-        quietMs:2000,
+        maxMs:2600,
+        quietMs:1300,
         minMs:450
       });
       await Promise.allSettled([...responseTasks]);
@@ -396,8 +396,8 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
       }));
 
       const wait=await waitGameplayQuiet(page,responses,{
-        maxMs:7000,
-        quietMs:1900,
+        maxMs:3600,
+        quietMs:1300,
         minMs:500
       });
       await Promise.allSettled([...responseTasks]);
