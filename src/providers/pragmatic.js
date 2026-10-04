@@ -196,10 +196,11 @@ export const pragmatic = {
   },
 
   async listPurchases(frame) {
-    return frame.evaluate(() => {
-      if (!window.globalRuntime) return [];
+    const collect = async () => frame.evaluate(() => {
+      if (!window.globalRuntime) return { options: [], pending: false };
       const roots = globalRuntime.sceneRoots || [];
       const out = new Map();
+      let pending = false;
 
       if (window.FeaturePurchaseOption) {
         for (const root of roots) {
@@ -211,28 +212,61 @@ export const pragmatic = {
               const index = Number(option.purchaseIndex);
               if (!Number.isFinite(index)) continue;
               const data = option.purchaseData;
-              const available = data?.purchaseOptionIsAvailable?.[index] ?? true;
+              const reportedAvailable = data?.purchaseOptionIsAvailable?.[index] ?? null;
+              const forceDisabled = option?.forceDisabled ?? null;
+              const available = forceDisabled === true ? false : true;
               const cost = data?.purchaseCosts?.[index] ?? null;
               const active = option.gameObject?.activeInHierarchy ?? null;
               const prev = out.get(index);
-              if (!prev || active === true) out.set(index, { index, ordinal: index + 1, available, active, cost, kind: 'FeaturePurchaseOption' });
+              if (!prev || active === true) {
+                out.set(index, {
+                  index,
+                  ordinal: index + 1,
+                  available,
+                  reportedAvailable,
+                  forceDisabled,
+                  active,
+                  cost,
+                  kind: 'FeaturePurchaseOption'
+                });
+              }
             } catch {}
           }
         }
       }
 
-      if (!out.size && window.FeaturePurchaseV2) {
+      if (window.FeaturePurchaseV2) {
         for (const root of roots) {
           let managers = [];
           try { managers = root.GetComponentsInChildren(FeaturePurchaseV2, true) || []; } catch {}
           for (const manager of managers) {
             const options = manager.purchaseOptions || [];
+            if (!options.length) pending = true;
+
             for (let index = 0; index < options.length; index++) {
               const option = options[index];
-              const available = manager.featurePurchaseData?.purchaseOptionIsAvailable?.[index] ?? !option?.forceDisabled;
+              if (!option) continue;
+
+              const reportedAvailable =
+                manager.featurePurchaseData?.purchaseOptionIsAvailable?.[index] ?? null;
+              const forceDisabled = option?.forceDisabled ?? null;
+              const available = forceDisabled === true ? false : true;
               const cost = manager.featurePurchaseData?.purchaseCosts?.[index] ?? null;
               const active = option?.gameObject?.activeInHierarchy ?? null;
-              out.set(index, { index, ordinal: index + 1, available, active, cost, kind: 'FeaturePurchaseV2' });
+
+              const prev = out.get(index);
+              if (!prev || prev.kind !== 'FeaturePurchaseOption') {
+                out.set(index, {
+                  index,
+                  ordinal: index + 1,
+                  available,
+                  reportedAvailable,
+                  forceDisabled,
+                  active,
+                  cost,
+                  kind: 'FeaturePurchaseV2'
+                });
+              }
             }
           }
         }
@@ -244,11 +278,14 @@ export const pragmatic = {
           try { managers = root.GetComponentsInChildren(FeaturePurchaseManager, true) || []; } catch {}
           for (const manager of managers) {
             const costs = manager.purchaseCosts || [];
+            if (!costs.length) pending = true;
             for (let index = 0; index < costs.length; index++) {
               out.set(index, {
                 index,
                 ordinal: index + 1,
-                available: manager.purchaseOptionIsAvailable?.[index] ?? true,
+                available: true,
+                reportedAvailable: manager.purchaseOptionIsAvailable?.[index] ?? null,
+                forceDisabled: null,
                 active: manager.gameObject?.activeInHierarchy ?? null,
                 cost: costs[index] ?? null,
                 kind: 'FeaturePurchaseManager'
@@ -258,8 +295,25 @@ export const pragmatic = {
         }
       }
 
-      return [...out.values()].sort((a, b) => a.index - b.index);
+      return {
+        options: [...out.values()].sort((a, b) => a.index - b.index),
+        pending
+      };
     });
+
+    let last = { options: [], pending: false };
+
+    // FeaturePurchaseV2 can exist before its purchaseOptions array is populated.
+    // Give that initialization a short bounded settle window instead of reporting
+    // a false zero-option result.
+    for (let attempt = 0; attempt < 9; attempt++) {
+      last = await collect();
+      if (last.options.length) return last.options;
+      if (!last.pending) return [];
+      await frame.page().waitForTimeout(200);
+    }
+
+    return last.options;
   },
 
   async purchase(frame, index) {
