@@ -4,7 +4,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { chromium } from 'playwright';
 import { bootstrapSupportedPage, findRuntime } from './providers/index.js';
 import { runTreeCrawler } from './tree-crawler.js';
-import { ensureDir, safeName, sleep, summarizeRequest, writeJson } from './lib/common.js';
+import { ensureDir, safeName, sleep, summarizeRequest, summarizeResponse, writeJson } from './lib/common.js';
 
 const DEMO_HOSTS = [
   /(^|\.)3oaks\.com$/i,
@@ -210,6 +210,39 @@ function hasGameplayRequest(requests) {
   });
 }
 
+function isGameplayTransport(responseOrRequest) {
+  try {
+    const request = typeof responseOrRequest.request === 'function'
+      ? responseOrRequest.request()
+      : responseOrRequest;
+    const url = typeof responseOrRequest.url === 'function'
+      ? responseOrRequest.url()
+      : request.url();
+    const method = request.method();
+    const post = request.postData() || '';
+    return (
+      /gameService|\/gs2c\/|\/game(?:$|\?)|\/api(?:\/|$)|spin|bonus|feature|purchase/i.test(url) ||
+      /(?:^|[&?{,\s])(action|command|pur|purchased_feature|bet|q)[=:"']/i.test(post) ||
+      method !== 'GET' && /demo\.|pragmatic|bgaming|bltrm|3oaks/i.test(url)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function attachGameplayResponseCapture(page, target, tasks) {
+  const handler = response => {
+    if (!isGameplayTransport(response)) return;
+    const task = summarizeResponse(response)
+      .then(summary => target.push(summary))
+      .catch(() => {})
+      .finally(() => tasks.delete(task));
+    tasks.add(task);
+  };
+  page.on('response', handler);
+  return handler;
+}
+
 function parsePragmaticPurInit(text) {
   if (!text) return null;
 
@@ -346,12 +379,15 @@ async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await context.newPage();
   const network = [];
+  const responses = [];
+  const responseTasks = new Set();
   page.on('request', req => {
     const u = req.url();
     if (/gameService|doSpin|doBonus|gs2c|spin|bonus|feature|purchase/i.test(u) || req.method() !== 'GET') {
       network.push(summarizeRequest(req));
     }
   });
+  const gameplayResponseHandler = attachGameplayResponseCapture(page, responses, responseTasks);
   const pragmaticPurInitHandler = attachPragmaticPurInitCapture(page);
 
   const result = {
@@ -360,6 +396,7 @@ async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, 
     press: null,
     spinFallback: null,
     network: [],
+    responses,
     screenshot: null,
     error: null
   };
@@ -412,6 +449,8 @@ async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, 
   } catch (error) {
     result.error = String(error?.stack || error?.message || error);
   } finally {
+    await Promise.allSettled([...responseTasks]);
+    try { page.off('response', gameplayResponseHandler); } catch {}
     try { page.off('response', pragmaticPurInitHandler); } catch {}
     await context.close();
   }
@@ -434,6 +473,7 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
     sweep: [],
     tree: null,
     requests: [],
+    responses: [],
     failureClass: null,
     error: null
   };
@@ -454,6 +494,8 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
     }
   };
   page.on('request', onRequest);
+  const responseTasks = new Set();
+  const gameplayResponseHandler = attachGameplayResponseCapture(page, result.responses, responseTasks);
   const pragmaticPurInitHandler = attachPragmaticPurInitCapture(page);
 
   console.log(`\n[${index}/${total}] ${url}`);
@@ -745,8 +787,10 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
   } finally {
     result.finishedAt = new Date().toISOString();
     const file = path.join('results', `${String(index).padStart(4, '0')}-${safeName(url)}.json`);
+    await Promise.allSettled([...responseTasks]);
     await writeJson(file, result);
     try { page.off('request', onRequest); } catch {}
+    try { page.off('response', gameplayResponseHandler); } catch {}
     try { page.off('response', pragmaticPurInitHandler); } catch {}
     if (ownsContext) await context.close();
   }
