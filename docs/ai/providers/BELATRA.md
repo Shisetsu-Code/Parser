@@ -1,19 +1,38 @@
 # Belatra
 
 status: provider-map
-confidence: medium
+confidence: high for current core/runtime sample
 sources:
 - uploaded HAR: belatragames.com_Archive [26-10-03 20-34-36].har
-- local official DEMO session
+- 7-game Belatra scenario HAR corpus captured 2026-10-03
+- local official DEMO sessions
+- common core and game-specific bundles
 - CI bootstrap diagnostics
 
-## Captured game [OBSERVED]
+## Current implementation [IMPLEMENTED]
 
-Page:
-Belatra Stars Blast
+Provider-specific adapter:
+`src/providers/belatra.js`
 
-Gameplay host:
-demo.bltrm.com
+Capabilities:
+- detects validated Belatra runtime via global `all_content`;
+- reads provider configuration/state;
+- hooks plaintext `ajaxQueue.post` before transport serialization;
+- exposes provider protocol-event cursor/events to tree crawler;
+- captures purchase-banner instance through `show_BuyBonusBanner`;
+- enumerates Buy Bonus options separately from confirmation;
+- exposes purchase-banner bet +/- controls;
+- treats line count as exact configuration controls when `useBetDependOnLines=true`;
+- delegates unresolved UI/Canvas interactions to trusted `generic-canvas`.
+
+Current validated core module exports:
+```text
+all_content(2731).data
+all_content(9337).unitmng
+all_content(1129).ajaxQueue
+```
+
+These numeric IDs are version-specific ABI observations. The adapter validates the exports and must fail/fallback safely if the provider bundle changes.
 
 ## Transport [OBSERVED]
 
@@ -26,11 +45,10 @@ d=<opaque/encrypted-or-encoded-payload>&sid=<session>
 ```
 
 Observed response:
-JSON/object containing an opaque d payload.
+JSON/object containing opaque d.
 
-A single endpoint multiplexes multiple game actions.
-
-Therefore endpoint path alone cannot classify:
+A single endpoint multiplexes many gameplay actions.
+Endpoint path alone cannot classify:
 - spin
 - purchase
 - bonus
@@ -38,75 +56,197 @@ Therefore endpoint path alone cannot classify:
 - continue
 - collect
 
-## Bootstrap evidence [OBSERVED]
+## Plaintext pre-serialization layer [OBSERVED]
 
-Provider/game resources expose common runtime/core bundles.
+The common core exposes the semantic action before it becomes opaque transport:
 
-Additional bootstrap request observed:
-user data/game list retrieval including GAMELIST semantics.
+```text
+ajaxQueue.post(actionObject, ...)
+    -> internal request queue
+    -> POST /game
+    -> d=<opaque>&sid=<session>
+```
 
-## Critical analysis implication
+This is now the preferred source of truth.
 
-The useful semantic action likely exists client-side before d is serialized/encrypted.
+Known plaintext action names/fields include:
+- q
+- name
+- att
+- info
+- setting
 
-Preferred Belatra strategy:
-1. identify function that constructs plaintext action/state
-2. instrument/hook immediately before d encoding
-3. record normalized plaintext + opaque network pair
-4. correlate with runtime control
-5. keep /game request/response as transport evidence
+Observed q values include:
+- play
+- enter
+- finish
+- savePlayerChoice
 
-Do not prioritize cryptanalysis when a pre-serialization runtime hook is available.
+The parser records these provider protocol events separately from opaque network requests.
 
-## CI behavior [OBSERVED]
+Do not attempt to decode d when a validated plaintext hook is available.
 
-GitHub Actions can discover the direct official demo URL:
-demo.bltrm.com/belatra/demo?...
+## Configuration state [OBSERVED]
 
-But the CI runner receives Cloudflare security verification / Turnstile before game runtime.
+Belatra core exposes:
+- data.gs.nlines
+- data.gs.linesAssortment
+- data.gs.betPerLine
+- data.gs.betPerGame
+- data.gs.betAssortment
+- unitmng.tGame.useBetDependOnLines
 
-Classification:
-CI_ACCESS_BLOCK
+When `useBetDependOnLines=true`, line count is a structural state dimension.
 
-This is not evidence that Belatra runtime/protocol parsing fails locally.
+Legacy of Doom proves:
+- line selection changes total bet calculation;
+- feature/payout code references `nlines * betPerLine`;
+- game-specific tables are indexed by `nlines-1`;
+- 1..10 line configurations must not be deduplicated into one purchase state.
 
-Do not attempt to bypass provider anti-bot/security verification.
+The provider adapter emits exact replayable `BELATRA_CONFIG` controls for line values.
 
-## State model
+## Purchase model [OBSERVED]
 
-Current transport alone is insufficient to determine generic terminal/continuation semantics.
+Belatra has both single and multi-purchase banners.
 
-Normalized analyzer may emit:
+Relevant runtime state:
+- unitmng.tGame.justBuyBonusSelectType
+- unitmng.tGame.justBuyBonusSelectType_AUTOBUY
+- data.gs.buyBonus
+- buyTotalBetK / buyTotalBetK_inside
+- purchase bet limit state
+
+Multi-buy flow can be:
+
+```text
+OPEN BUY
+-> SELECT OPTION
+-> optionally change purchase bet
+-> START / YES / BUY confirmation
+-> feature
+```
+
+Selection and confirmation are separate actions.
+
+The adapter captures the active Buy Bonus banner and exposes:
+- `BELATRA_BUY_OPTION`
+- `BELATRA_BUY_CONFIRM`
+- `BELATRA_BUY_BET`
+
+Do not mark an option click as a completed purchase.
+
+## Semantic selection/picker model [OBSERVED]
+
+Several features send explicit plaintext choices:
+
+```json
+{
+  "q": "savePlayerChoice",
+  "name": "Bonus2",
+  "att": 0,
+  "info": 3
+}
+```
+
+Interpretation:
+- name: selection family/state
+- att: attempt/step
+- info: selected option ID
+
+Examples:
+- Lazy Monkey Bonus2: repeated rope choices
+- Lazy Monkey Bonus3: bag choices
+- 4 Secrets of Aladdin: Gems choices
+
+Each `(name, att)` is a selection state.
+Distinct `info` values are sibling branches.
+
+Wait for the result of one `savePlayerChoice` before issuing another.
+
+## Interstitial continuation [OBSERVED]
+
+Belatra games can expose `PRESS TO CONTINUE` / click-to-continue states.
+
+Jackpot Pagoda demonstrates:
+- automatic progression may dismiss the state;
+- manual input can also dismiss it;
+- timeout behavior can coexist with manual continuation.
+
+Required ordering:
+1. observe automatic activity;
+2. wait until quiet;
+3. only if still blocked, branch a trusted continuation input.
+
+## Scenario corpus
+
+See:
+`docs/ai/providers/BELATRA_SCENARIOS.md`
+
+Covered:
+- 4 Secrets of Aladdin
+- Irish Thunder
+- Halloween Crystals
+- X-Mas Gifts
+- Legacy of Doom
+- Lazy Monkey
+- Jackpot Pagoda
+
+The corpus intentionally covers:
+- single purchase;
+- multi-purchase;
+- option + explicit submit;
+- mutable purchase bet;
+- line-dependent purchase configuration;
+- repeated internal picks;
+- click-to-continue;
+- automatic continuation.
+
+## Normalized state
+
+Suggested shape:
+
 ```json
 {
   "provider": "belatra",
-  "phase": "unknown",
+  "phase": "base|configuration|purchase|selection|feature|terminal|unknown",
   "terminal": null,
   "availableActions": [],
-  "opaqueTransport": true,
-  "sessionPresent": true,
+  "configuration": {
+    "nlines": null,
+    "betPerLine": null,
+    "betPerGame": null
+  },
+  "purchase": {
+    "selectedOption": null,
+    "confirmRequired": null
+  },
+  "protocol": {
+    "lastAction": null
+  },
   "raw": {}
 }
 ```
 
-until runtime plaintext instrumentation is available.
+## CI behavior [OBSERVED]
 
-## Next implementation target
+GitHub Actions can discover and navigate to direct official demo URLs under demo.bltrm.com.
 
-Provider-specific runtime/protocol adapter should discover:
-- action object before d serialization
-- spin action
-- purchase/feature action
-- bonus continuation
-- selection/pick indices
-- terminal/round-state field
-- client sequence/counter if required
+The GitHub-hosted runner can receive Cloudflare security verification / Turnstile before the game runtime.
+
+Classification:
+CI_ACCESS_BLOCK
+
+This is not evidence that the Belatra runtime adapter fails locally.
+
+Do not attempt to bypass provider anti-bot/security verification.
 
 ## Unknowns
 
-- d encoding/encryption algorithm
-- universal plaintext schema
-- generic terminal field
-- generic action names across Belatra families
+- universal stability of current `all_content` module IDs across future core builds;
+- complete generic terminal field across all Belatra game families;
+- all possible q values;
+- whether monetary bet variation changes feature topology in every line-dependent title;
+- complete semantic discovery of all Canvas-only selection option IDs without runtime metadata.
 
-Keep all /game deltas and runtime snapshots.
+Preserve raw plaintext protocol events and opaque /game deltas.
