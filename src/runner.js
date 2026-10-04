@@ -210,6 +210,70 @@ function hasGameplayRequest(requests) {
   });
 }
 
+async function settleSweepProvider(provider, frame, page, options, protocolBefore = null) {
+  if (provider?.id !== 'belatra') return { waitedMs: 0, transitions: 0 };
+
+  const maxWaitMs = Math.max(1200, Math.min(Number(options.treeAutoWaitMs) || 5000, 8000));
+  const quietMs = Math.max(500, Math.min(Number(options.treeQuietMs) || 800, 1400));
+  const pollMs = 180;
+
+  const started = Date.now();
+  let lastActivityAt = Date.now();
+  let lastCursor = protocolBefore;
+  let lastSnapshot = null;
+  let transitions = 0;
+
+  try {
+    if (typeof provider.stateSnapshot === 'function') {
+      const snapshot = await provider.stateSnapshot(frame);
+      lastSnapshot = JSON.stringify(snapshot ?? null);
+    }
+  } catch {}
+
+  while (Date.now() - started < maxWaitMs) {
+    await page.waitForTimeout(pollMs);
+
+    let cursor = lastCursor;
+    try {
+      if (typeof provider.protocolCursor === 'function') {
+        cursor = await provider.protocolCursor(frame);
+      }
+    } catch {}
+
+    let snapshotText = lastSnapshot;
+    try {
+      if (typeof provider.stateSnapshot === 'function') {
+        const snapshot = await provider.stateSnapshot(frame);
+        snapshotText = JSON.stringify(snapshot ?? null);
+      }
+    } catch {}
+
+    const cursorChanged =
+      cursor != null &&
+      lastCursor != null &&
+      Number(cursor) !== Number(lastCursor);
+    const stateChanged =
+      snapshotText != null &&
+      lastSnapshot != null &&
+      snapshotText !== lastSnapshot;
+
+    if (cursorChanged || stateChanged) {
+      transitions++;
+      lastActivityAt = Date.now();
+      if (cursor != null) lastCursor = cursor;
+      if (snapshotText != null) lastSnapshot = snapshotText;
+      continue;
+    }
+
+    if (Date.now() - lastActivityAt >= quietMs) break;
+  }
+
+  return {
+    waitedMs: Date.now() - started,
+    transitions
+  };
+}
+
 async function pauseForInspection(message) {
   if (!input.isTTY) {
     console.log('    stdin is not interactive; skipping Enter pause');
@@ -427,6 +491,13 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
         purchaseIndex: control?.purchaseIndex ?? null,
         optionIndex: control?.optionIndex ?? null,
         type: control?.type ?? null,
+        method: control?.method ?? null,
+        configKey: control?.configKey ?? null,
+        configValue: control?.configValue ?? null,
+        runtimeSource: control?.runtimeSource ?? null,
+        runtimeName: control?.runtimeName ?? null,
+        runtimeMethod: control?.runtimeMethod ?? null,
+        semantic: control?.semantic ?? null,
         active: control?.active ?? null
       });
 
@@ -452,12 +523,37 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
         }
 
         await page.waitForTimeout(Math.min(Math.max(options.actionWaitMs, 250), 900));
-        const delta = network.slice(before);
-        const signature = trafficSignature(delta);
-        const protocol =
+
+        let delta = network.slice(before);
+        let signature = trafficSignature(delta);
+        let protocol =
           protocolBefore != null && typeof provider.protocolEvents === 'function'
             ? await provider.protocolEvents(sweepFrame, protocolBefore).catch(() => [])
             : [];
+
+        const shouldSettle =
+          provider.id === 'belatra' &&
+          press?.ok &&
+          (
+            signature.requestCount > 0 ||
+            protocol.length > 0 ||
+            /^BELATRA_/.test(String(control?.kind || '')) ||
+            ['spin', 'buy', 'bonus', 'ante'].includes(String(control?.semantic || ''))
+          );
+
+        const settled = shouldSettle
+          ? await settleSweepProvider(provider, sweepFrame, page, options, protocolBefore)
+          : { waitedMs: 0, transitions: 0 };
+
+        if (shouldSettle) {
+          delta = network.slice(before);
+          signature = trafficSignature(delta);
+          protocol =
+            protocolBefore != null && typeof provider.protocolEvents === 'function'
+              ? await provider.protocolEvents(sweepFrame, protocolBefore).catch(() => [])
+              : [];
+        }
+
         const protocolNames = protocol
           .map(item => item?.payload?.q || item?.payload?.action || item?.payload?.command || null)
           .filter(Boolean);
@@ -481,6 +577,7 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
           elapsedMs: Date.now() - started,
           traffic: { ...signature, signals: combinedSignals },
           protocol,
+          settled,
           network: delta
         });
 
@@ -497,6 +594,7 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
           `event=${control.event ?? '-'} ok=${Boolean(press?.ok)}` +
           failureDetail + ' ' +
           `requests=${signature.requestCount} protocol=${protocol.length} ` +
+          `wait=${settled.waitedMs}ms transitions=${settled.transitions} ` +
           `q=${[...new Set(protocolNames)].join(',') || '-'} ` +
           `signals=${combinedSignals.join(',') || '-'}`
         );
