@@ -650,6 +650,237 @@ export const pragmatic = {
     }, { normalized, eventMap: EVENT_MAP });
   },
 
+  async protocolState(frame) {
+    return frame.evaluate(() => {
+      if (!globalThis.XT || !globalThis.Vars) return null;
+      const readBool = key => {
+        try {
+          const ref = Vars[key];
+          return ref ? XT.GetBool(ref) : null;
+        } catch {
+          return null;
+        }
+      };
+
+      const roots = globalThis.globalRuntime?.sceneRoots || [];
+      const pickerControls = [];
+
+      if (globalThis.XTButton) {
+        for (let ri = 0; ri < roots.length; ri++) {
+          let buttons = [];
+          try { buttons = roots[ri].GetComponentsInChildren(XTButton, true) || []; } catch {}
+          for (let bi = 0; bi < buttons.length; bi++) {
+            const button = buttons[bi];
+            try {
+              const name = String(button.gameObject?.name || '');
+              const event = String(button.eventToCode?.name || '');
+              const active = button.gameObject?.activeInHierarchy !== false;
+              const text = (name + ' ' + event).toLowerCase();
+
+              if (!/itempicked|bonuspick|fsbgpick|pickitem|select(?:ed)?option|option_\d/i.test(text)) {
+                continue;
+              }
+
+              pickerControls.push({
+                root: ri,
+                index: bi,
+                name,
+                event,
+                active,
+                canClick: typeof button.OnClick === 'function',
+                canPress: typeof button.OnPress === 'function'
+              });
+            } catch {}
+          }
+        }
+      }
+
+      return {
+        canSpin: readBool('CanSpin'),
+        fsStartNeedsConfirmation: readBool('FSStartNeedsConfirmation'),
+        logicIsFreeSpin: readBool('Logic_IsFreeSpin'),
+        receivedFreeSpinsResponse: readBool('ReceivedFreeSpinsResponse'),
+        mustResumeFreeSpinOptions: readBool('MustResumeFreeSpinOptions'),
+        spinBlockingFeatureIsRunning: readBool('SpinBlockingFeatureIsRunning'),
+        manualRespin: readBool('ManualRespin'),
+        respinInProgress: readBool('RespinInProgress'),
+        pickerControls
+      };
+    }).catch(() => null);
+  },
+
+  async continueProtocol(frame, exchange) {
+    const state = await this.protocolState(frame);
+    const na = String(exchange?.na || '').toLowerCase();
+
+    if (na === 'b' || (exchange?.bgid != null && String(exchange?.end ?? '') !== '1')) {
+      const choices = (state?.pickerControls || []).filter(item => item.active !== false);
+      return {
+        ok: false,
+        needsSelection: true,
+        kind: 'bonus-pick',
+        choices,
+        state
+      };
+    }
+
+    if (na === 'c') {
+      return frame.evaluate(() => {
+        try {
+          const candidates = [
+            'Evt_DataToCode_FreeSpinsWindowWinCollectPressed',
+            'Evt_DataToCode_FreeSpinsWindowLoseCollectPressed',
+            'Evt_DataToCode_BonusResultWindow_PressedCollect',
+            'Evt_DataToCode_CollectPressed'
+          ];
+
+          for (const key of candidates) {
+            const event = globalThis.Vars?.[key];
+            if (!event) continue;
+            if (typeof globalThis.XT?.TriggerEvent !== 'function') continue;
+            XT.TriggerEvent(event);
+            return {
+              ok: true,
+              kind: 'collect',
+              strategy: 'XT.TriggerEvent(Vars.' + key + ')',
+              event: key
+            };
+          }
+
+          return { ok: false, kind: 'collect', reason: 'No collect event available' };
+        } catch (error) {
+          return { ok: false, kind: 'collect', reason: String(error?.message || error) };
+        }
+      });
+    }
+
+    if (na === 's') {
+      const fs = Number(exchange?.fs);
+      const fsmax = Number(exchange?.fsmax);
+      const featureSpin =
+        (Number.isFinite(fsmax) && fsmax > 0 && Number.isFinite(fs) && fs < fsmax) ||
+        String(exchange?.rs || '').toLowerCase() === 'mc' ||
+        (exchange?.trail != null && /pending|feature/i.test(String(exchange.trail)));
+
+      if (!featureSpin) {
+        return {
+          ok: false,
+          kind: 'spin',
+          reason: 'Protocol does not prove an active feature spin',
+          state
+        };
+      }
+
+      // The first purchased free-spin result commonly leaves CanSpin=false and
+      // waits for the internal "start free spins" confirmation. Trigger that
+      // canonical event before attempting another spin.
+      if (
+        state?.fsStartNeedsConfirmation === true &&
+        state?.logicIsFreeSpin !== true
+      ) {
+        const confirm = await frame.evaluate(() => {
+          try {
+            const event = globalThis.Vars?.Evt_DataToCode_ConfirmFSStart;
+            if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
+              return { ok: false, reason: 'Evt_DataToCode_ConfirmFSStart unavailable' };
+            }
+            XT.TriggerEvent(event);
+            return {
+              ok: true,
+              kind: 'confirm-fs-start',
+              strategy: 'XT.TriggerEvent(Vars.Evt_DataToCode_ConfirmFSStart)'
+            };
+          } catch (error) {
+            return { ok: false, reason: String(error?.message || error) };
+          }
+        });
+
+        if (confirm?.ok) return { ...confirm, state };
+      }
+
+      const spin = await frame.evaluate(() => {
+        try {
+          const event = globalThis.Vars?.Evt_DataToCode_Pressed_Spin;
+          if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
+            return { ok: false, reason: 'Evt_DataToCode_Pressed_Spin unavailable' };
+          }
+          XT.TriggerEvent(event);
+          return {
+            ok: true,
+            kind: 'protocol-spin',
+            strategy: 'XT.TriggerEvent(Vars.Evt_DataToCode_Pressed_Spin)'
+          };
+        } catch (error) {
+          return { ok: false, reason: String(error?.message || error) };
+        }
+      });
+
+      return { ...spin, state };
+    }
+
+    return {
+      ok: false,
+      kind: 'unknown',
+      reason: 'No protocol continuation for na=' + na,
+      state
+    };
+  },
+
+  async pressProtocolChoice(frame, choice) {
+    return frame.evaluate(({ choice }) => {
+      try {
+        if (!globalThis.XTButton) {
+          return { ok: false, reason: 'XTButton unavailable' };
+        }
+
+        const roots = globalThis.globalRuntime?.sceneRoots || [];
+        const root = roots[Number(choice?.root)];
+        if (!root) return { ok: false, reason: 'picker root unavailable' };
+
+        const buttons = root.GetComponentsInChildren(XTButton, true) || [];
+        const candidates = buttons.filter(button => {
+          try {
+            return (
+              button.gameObject?.activeInHierarchy !== false &&
+              String(button.gameObject?.name || '') === String(choice?.name || '') &&
+              String(button.eventToCode?.name || '') === String(choice?.event || '')
+            );
+          } catch {
+            return false;
+          }
+        });
+
+        const target = candidates[0];
+        if (!target) return { ok: false, reason: 'picker control unavailable' };
+
+        if (typeof target.OnClick === 'function') {
+          target.OnClick();
+          return {
+            ok: true,
+            strategy: 'picker XTButton.OnClick()',
+            name: choice?.name ?? null,
+            event: choice?.event ?? null
+          };
+        }
+
+        if (typeof target.OnPress === 'function') {
+          target.OnPress(true);
+          target.OnPress(false);
+          return {
+            ok: true,
+            strategy: 'picker XTButton.OnPress(true/false)',
+            name: choice?.name ?? null,
+            event: choice?.event ?? null
+          };
+        }
+
+        return { ok: false, reason: 'picker has no click/press path' };
+      } catch (error) {
+        return { ok: false, reason: String(error?.message || error) };
+      }
+    }, { choice });
+  },
+
   async listPurchases(frame) {
     await this.waitReady(frame, 10_000).catch(() => null);
     const collect = async () => frame.evaluate(() => {
