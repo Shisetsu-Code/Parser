@@ -2,12 +2,31 @@
 
 Small Playwright runner that discovers controls from the game runtime and presses them without screenshots, OCR or coordinate guessing.
 
+## AI / agent context
+
+Agents extending or analyzing this repository should load these files before changing provider behavior:
+
+- `docs/ai/AGENT_CONTEXT.md` — canonical architecture, invariants and source-of-truth order.
+- `docs/ai/STATE_MACHINE_SPEC.md` — provider-neutral replay/branch/wait state machine.
+- `docs/ai/providers/` — provider-specific evidence and protocol maps.
+- `docs/ai/EVIDENCE_MANIFEST.json` — HAR-derived evidence with source files and confidence policy.
+- `skills/game-protocol-mapper/SKILL.md` — reusable workflow for HAR analysis, provider mapping and Parser extension.
+
+Current mapped provider set:
+
+- Pragmatic Play — provider-specific runtime adapter + advanced protocol knowledge.
+- 3Oaks — provider-specific GameRunner adapter + partial/advanced protocol/runtime knowledge.
+- BGaming — generic Canvas runtime support + HAR-derived provider protocol map covering command and JSON-RPC families.
+- Belatra — HAR-derived multiplexed `POST /game` transport map; CI DEMO access may be blocked by provider anti-bot.
+
+The repository follows a traffic/state-first rule: UI actions do not need semantic classification before execution. Raw request/response and runtime state are the source of truth.
+
 Initial providers:
 
 - **3Oaks / GameRunner**: inspects `GR.UI.view` and invokes the control's own click/pointer path. `GR.UI.Events` is only a fallback.
 - **Pragmatic Play / UHT**: enumerates real `XTButton` components from `globalRuntime.sceneRoots`, maps their `eventToCode`, and presses `XTButton.OnPress(true/false)` / `OnClick()`. `XT.TriggerEvent` is only a fallback for known events.
 
-The runner is **demo-only by default** and only opens official 3Oaks / Pragmatic hosts. Each game gets a fresh Playwright browser context.
+The runner is **demo-only by default** and only opens allowlisted official provider/demo hosts. Each game gets a fresh Playwright browser context.
 
 ## Install
 
