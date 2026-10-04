@@ -425,6 +425,29 @@ export const pragmatic = {
       const roots = globalRuntime.sceneRoots || [];
       const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+      const getPendingPurchaseIndex = () => {
+        try {
+          return Number(XT.GetObject(Vars.FeaturePurchase)?.purchaseIndex ?? -2);
+        } catch {
+          return -2;
+        }
+      };
+
+      const ensurePendingPurchaseIndex = () => {
+        let pending = getPendingPurchaseIndex();
+        if (pending === Number(index)) return pending;
+
+        try {
+          const data = XT.GetObject(Vars.FeaturePurchase);
+          if (data && typeof data === 'object') {
+            data.purchaseIndex = Number(index);
+            pending = getPendingPurchaseIndex();
+          }
+        } catch {}
+
+        return pending;
+      };
+
       const invokeButton = button => {
         if (!button) return false;
         if (typeof button.OnPress === 'function') {
@@ -483,15 +506,16 @@ export const pragmatic = {
             confirm.OnClick();
             await wait(300);
           }
-          const selected = (() => {
-            try { return XT.GetObject(Vars.FeaturePurchase)?.purchaseIndex ?? -2; } catch { return -2; }
-          })();
+          const selected = ensurePendingPurchaseIndex();
           return {
-            ok: true,
+            ok: selected === Number(index),
             index,
             selectedIndex: selected,
-            strategy: confirm ? 'FeaturePurchaseOption.OnClick() + confirm.OnClick()' : 'FeaturePurchaseOption.OnClick()',
-            needsSpin: selected >= 0
+            strategy: confirm
+              ? 'FeaturePurchaseOption.OnClick() + confirm.OnClick() + canonical purchaseIndex verify'
+              : 'FeaturePurchaseOption.OnClick() + canonical purchaseIndex verify',
+            needsSpin: selected === Number(index),
+            reason: selected === Number(index) ? null : 'Canonical FeaturePurchase purchaseIndex was not selected'
           };
         }
       }
@@ -508,12 +532,31 @@ export const pragmatic = {
                 if (method === 'OnPress') { option[method](true); option[method](false); }
                 else option[method]();
                 await wait(250);
-                return { ok: true, index, strategy: 'FeaturePurchaseV2.purchaseOptions[' + index + '].' + method + '()', needsSpin: true };
+                const pending = ensurePendingPurchaseIndex();
+                return {
+                  ok: pending === Number(index),
+                  index,
+                  selectedIndex: pending,
+                  strategy:
+                    'FeaturePurchaseV2.purchaseOptions[' + index + '].' + method +
+                    '() + canonical purchaseIndex verify',
+                  needsSpin: pending === Number(index),
+                  reason: pending === Number(index) ? null : 'Canonical FeaturePurchase purchaseIndex was not selected'
+                };
               }
             }
             if (typeof manager.PurchaseFeature === 'function') {
               manager.PurchaseFeature(index);
-              return { ok: true, index, strategy: 'FeaturePurchaseV2.PurchaseFeature(index)', needsSpin: true };
+              await wait(200);
+              const pending = ensurePendingPurchaseIndex();
+              return {
+                ok: pending === Number(index),
+                index,
+                selectedIndex: pending,
+                strategy: 'FeaturePurchaseV2.PurchaseFeature(index) + canonical purchaseIndex verify',
+                needsSpin: pending === Number(index),
+                reason: pending === Number(index) ? null : 'Canonical FeaturePurchase purchaseIndex was not selected'
+              };
             }
           }
         }
@@ -526,11 +569,39 @@ export const pragmatic = {
           for (const manager of managers) {
             if (typeof manager.PurchaseFeature === 'function' && index < (manager.purchaseCosts?.length ?? 0)) {
               manager.PurchaseFeature(index);
-              return { ok: true, index, strategy: 'FeaturePurchaseManager.PurchaseFeature(index)', needsSpin: true };
+              await wait(200);
+              const pending = ensurePendingPurchaseIndex();
+              return {
+                ok: pending === Number(index),
+                index,
+                selectedIndex: pending,
+                strategy: 'FeaturePurchaseManager.PurchaseFeature(index) + canonical purchaseIndex verify',
+                needsSpin: pending === Number(index),
+                reason: pending === Number(index) ? null : 'Canonical FeaturePurchase purchaseIndex was not selected'
+              };
             }
           }
         }
       }
+
+      // Server purInit can declare a purchase before a concrete UI handler
+      // materializes. The canonical FeaturePurchase object is the state consumed
+      // by the spin serializer. Use it as a final runtime-level fallback.
+      try {
+        const declared = Number(globalThis.__parserPragmaticPurInit?.count);
+        if (Number.isFinite(declared) && index >= 0 && index < declared) {
+          const pending = ensurePendingPurchaseIndex();
+          if (pending === Number(index)) {
+            return {
+              ok: true,
+              index,
+              selectedIndex: pending,
+              strategy: 'canonical FeaturePurchase.purchaseIndex fallback',
+              needsSpin: true
+            };
+          }
+        }
+      } catch {}
 
       return { ok: false, index, reason: 'No Pragmatic purchase option handler found' };
     }, { index });
