@@ -626,6 +626,28 @@ export const pragmatic = {
               /(buy|purchase)/i.test(economicText) ? 'buy_feature' :
               null;
 
+            const economicState = {};
+            const readPrimitive = key => {
+              try {
+                const value = b?.[key];
+                if (typeof value === 'function' && value.length === 0) {
+                  const out = value.call(b);
+                  return out == null || ['string','number','boolean'].includes(typeof out)
+                    ? out
+                    : undefined;
+                }
+                if (value == null || ['string','number','boolean'].includes(typeof value)) return value;
+              } catch {}
+              return undefined;
+            };
+            for (const key of [
+              'selected','state','text','price','cost','multiplier',
+              'value','mode','enabled','disabled'
+            ]) {
+              const value = readPrimitive(key);
+              if (value !== undefined) economicState[key] = value;
+            }
+
             controls.push({
               kind: 'XTButton',
               root: ri,
@@ -635,6 +657,7 @@ export const pragmatic = {
               purchaseSubtype,
               occurrence,
               active,
+              state: economicState,
               canPress: typeof b.OnPress === 'function',
               canClick: typeof b.OnClick === 'function'
             });
