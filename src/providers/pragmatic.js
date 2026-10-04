@@ -328,7 +328,7 @@ export const pragmatic = {
   },
 
   async pressPreBaseSelection(frame, selection) {
-    return frame.evaluate(({ selection }) => {
+    const picked = await frame.evaluate(({ selection }) => {
       try {
         const roots = globalThis.globalRuntime?.sceneRoots || [];
         if (!globalThis.XTButton) {
@@ -401,6 +401,44 @@ export const pragmatic = {
       reason:String(error?.message || error),
       selection
     }));
+
+    if (!picked?.ok) return picked;
+
+    await frame.page().waitForTimeout(250);
+
+    const finalize = await frame.evaluate(() => {
+      try {
+        const event = globalThis.Vars?.Evt_DataToCode_FSBG_CloseConfirmation;
+        if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
+          return {
+            ok:false,
+            skipped:true,
+            reason:'Evt_DataToCode_FSBG_CloseConfirmation unavailable'
+          };
+        }
+
+        XT.TriggerEvent(event);
+        return {
+          ok:true,
+          strategy:'XT.TriggerEvent(Vars.Evt_DataToCode_FSBG_CloseConfirmation)'
+        };
+      } catch (error) {
+        return {
+          ok:false,
+          reason:String(error?.message || error)
+        };
+      }
+    }).catch(error => ({
+      ok:false,
+      reason:String(error?.message || error)
+    }));
+
+    await frame.page().waitForTimeout(350);
+
+    return {
+      ...picked,
+      finalize
+    };
   },
 
   async stateSnapshot(frame) {
@@ -666,6 +704,7 @@ export const pragmatic = {
       const pickerControls = [];
       const confirmFSControls = [];
       const bonusControls = [];
+      const stopControls = [];
 
       if (globalThis.XTButton) {
         for (let ri = 0; ri < roots.length; ri++) {
@@ -691,6 +730,10 @@ export const pragmatic = {
 
               if (/confirmfsstart|evt_datatocode_confirmfsstart/i.test(text)) {
                 confirmFSControls.push(descriptor);
+              }
+
+              if (/evt_datatocode_pressed_stop|stopspin_button|pressed_stop/i.test(text)) {
+                stopControls.push(descriptor);
               }
 
               if (/itempicked|bonuspick|fsbgpick|pickitem|select(?:ed)?option|option_\d/i.test(text)) {
@@ -805,6 +848,8 @@ export const pragmatic = {
         pickerControls,
         confirmFSControls,
         confirmFSActive: confirmFSControls.some(item => item.active === true),
+        stopControls,
+        stopActive: stopControls.some(item => item.active === true),
         bonusControls,
         transportObjects: transportObjects.slice(0,40),
         bonusObjects: {
@@ -935,6 +980,38 @@ export const pragmatic = {
           reason: 'Protocol does not prove an active feature spin',
           state
         };
+      }
+
+      // Cascade/multi-cascade responses can leave the runtime in an animation
+      // phase with StopSpin active and CanSpin=false. Ending that animation is the
+      // explicit runtime transition that allows the next cascade/server request.
+      if (
+        String(exchange?.rs || '').toLowerCase() === 'mc' &&
+        state?.stopActive === true
+      ) {
+        const stop = await frame.evaluate(() => {
+          try {
+            const event = globalThis.Vars?.Evt_DataToCode_Pressed_Stop;
+            if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
+              return { ok:false, reason:'Evt_DataToCode_Pressed_Stop unavailable' };
+            }
+
+            XT.TriggerEvent(event);
+            return {
+              ok:true,
+              kind:'cascade-stop',
+              strategy:'XT.TriggerEvent(Vars.Evt_DataToCode_Pressed_Stop)'
+            };
+          } catch (error) {
+            return {
+              ok:false,
+              kind:'cascade-stop',
+              reason:String(error?.message || error)
+            };
+          }
+        });
+
+        return { ...stop, state };
       }
 
       // If the runtime is already spin-capable, the server response itself has
