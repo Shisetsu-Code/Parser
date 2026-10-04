@@ -246,7 +246,7 @@ function terminalCandidate(exchange, snapshot) {
   return na==='s' || snapshot?.canSpin===true;
 }
 
-async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex) {
+async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex, preBaseSelectionIndex = null) {
   let context=await browser.newContext({viewport:{width:1440,height:900}});
   let page=await context.newPage();
   const requests=[];
@@ -304,6 +304,8 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
     slug,
     expectedPurchaseCount:expectedCount,
     purchaseIndex,
+    preBaseSelectionIndex,
+    preBaseSelection:null,
     status:'UNKNOWN',
     error:null,
     detectedCount:null,
@@ -331,6 +333,30 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
 
     await page.waitForTimeout(500);
     await Promise.allSettled([...responseTasks]);
+
+    let discoveryReady=await provider.waitReady?.(frame,5000).catch(()=>null);
+    if (!discoveryReady?.ok && discoveryReady?.preBaseSelection === true) {
+      const selections=await provider.listPreBaseSelections?.(frame) ?? [];
+      const branchIndex=
+        preBaseSelectionIndex == null
+          ? 0
+          : Number(preBaseSelectionIndex);
+      const selection=selections[branchIndex];
+      if (!selection) {
+        throw new Error(
+          'pre-base selection unavailable index='+branchIndex+
+          ' count='+selections.length
+        );
+      }
+      const press=await provider.pressPreBaseSelection(frame,selection);
+      result.preBaseSelection={selection,press,phase:'discovery'};
+      if (!press?.ok) throw new Error('pre-base selection press failed: '+(press?.reason||'unknown'));
+      await page.waitForTimeout(600);
+      discoveryReady=await provider.waitReady?.(frame,10000).catch(()=>null);
+      if (!discoveryReady?.ok) {
+        throw new Error('discovery base state not ready after pre-base selection: '+(discoveryReady?.reason||'unknown'));
+      }
+    }
 
     const options=await provider.listPurchases(frame);
     result.detectedCount=options.length;
@@ -371,11 +397,38 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
     }
 
     frame=executionRuntime.frame;
-    await executionRuntime.provider.waitReady?.(frame,10000).then(ready=>{
-      if(!ready?.ok) {
-        throw new Error('clean Pragmatic base state not ready: '+(ready?.reason||'unknown'));
+    let executionReady=await executionRuntime.provider.waitReady?.(frame,5000).catch(()=>null);
+
+    if (!executionReady?.ok && executionReady?.preBaseSelection === true) {
+      const selections=await executionRuntime.provider.listPreBaseSelections?.(frame) ?? [];
+      const branchIndex=
+        preBaseSelectionIndex == null
+          ? 0
+          : Number(preBaseSelectionIndex);
+      const selection=selections[branchIndex];
+      if (!selection) {
+        throw new Error(
+          'execution pre-base selection unavailable index='+branchIndex+
+          ' count='+selections.length
+        );
       }
-    });
+
+      const press=await executionRuntime.provider.pressPreBaseSelection(frame,selection);
+      result.preBaseSelection={
+        ...(result.preBaseSelection || {}),
+        execution:{selection,press}
+      };
+      if (!press?.ok) {
+        throw new Error('execution pre-base selection press failed: '+(press?.reason||'unknown'));
+      }
+
+      await page.waitForTimeout(600);
+      executionReady=await executionRuntime.provider.waitReady?.(frame,10000).catch(()=>null);
+    }
+
+    if(!executionReady?.ok) {
+      throw new Error('clean Pragmatic base state not ready: '+(executionReady?.reason||'unknown'));
+    }
 
     const requestBase=requests.length;
     const responseBase=responses.length;
@@ -726,6 +779,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
 
     console.log(
       gameName+
+      ' branch='+(preBaseSelectionIndex ?? '-')+
       ' purchase='+purchaseIndex+
       ' status='+result.status+
       ' requests='+postPurchaseRequests.length+
@@ -737,7 +791,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
   } catch (error) {
     result.status='ERROR';
     result.error=String(error?.stack||error?.message||error);
-    console.log(gameName+' purchase='+purchaseIndex+' ERROR '+String(error?.message||error));
+    console.log(gameName+' branch='+(preBaseSelectionIndex ?? '-')+' purchase='+purchaseIndex+' ERROR '+String(error?.message||error));
   } finally {
     await Promise.allSettled([...responseTasks]);
     page.off('request',onRequest);
@@ -748,12 +802,76 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
   return result;
 }
 
+async function probePreBaseBranches(browser, slug) {
+  const context=await browser.newContext({viewport:{width:1440,height:900}});
+  const page=await context.newPage();
+  const responseTasks=new Set();
+  let handler=null;
+
+  try {
+    handler=response=>{
+      if (!/gameService/i.test(response.url())) return;
+      const task=(async()=>{
+        const summary=await summarizeResponse(response);
+        const req=parseForm(summary.requestPostData||'');
+        if (req.action!=='doInit') return;
+        const body=parseForm(summary.body||'');
+        const raw=body.purInit ?? null;
+        let options=[];
+        if (raw!=null) {
+          let decoded=raw;
+          try { decoded=decodeURIComponent(raw); } catch {}
+          let parsed=null;
+          try { parsed=JSON.parse(decoded); } catch {}
+          if (Array.isArray(parsed)) options=parsed;
+          else if (parsed && Array.isArray(parsed.options)) options=parsed.options;
+        }
+        try {
+          await response.request().frame().evaluate(value=>{
+            globalThis.__parserPragmaticPurInit={count:value.length,options:value};
+          },options);
+        } catch {}
+      })().catch(()=>{}).finally(()=>responseTasks.delete(task));
+      responseTasks.add(task);
+    };
+    page.on('response',handler);
+
+    await page.goto(urlFor(slug),{waitUntil:'domcontentloaded',timeout:30000});
+    await page.waitForTimeout(2200);
+    await bootstrapSupportedPage(page);
+    const runtime=await findRuntime(page,12000);
+    if (!runtime || runtime.provider.id!=='pragmatic') return [null];
+
+    const selections=await runtime.provider.listPreBaseSelections?.(runtime.frame) ?? [];
+    if (!selections.length) return [null];
+    return selections.map((_,index)=>index);
+  } catch {
+    return [null];
+  } finally {
+    await Promise.allSettled([...responseTasks]);
+    if (handler) page.off('response',handler);
+    await context.close();
+  }
+}
+
 const browser=await chromium.launch({headless:true});
 const results=[];
 
 for (const [gameName,slug,count] of GAMES) {
-  for (let purchaseIndex=0; purchaseIndex<count; purchaseIndex++) {
-    results.push(await runPurchase(browser,gameName,slug,count,purchaseIndex));
+  const branches=await probePreBaseBranches(browser,slug);
+  for (const branchIndex of branches) {
+    for (let purchaseIndex=0; purchaseIndex<count; purchaseIndex++) {
+      results.push(
+        await runPurchase(
+          browser,
+          gameName,
+          slug,
+          count,
+          purchaseIndex,
+          branchIndex
+        )
+      );
+    }
   }
 }
 
