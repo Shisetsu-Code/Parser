@@ -224,17 +224,15 @@ async function pauseForInspection(message) {
 }
 
 async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, options) {
-  const ownsContext = !sharedSession;
-  const context = sharedSession?.context ?? await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = sharedSession?.page ?? await context.newPage();
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
   const network = [];
-  const onRequest = req => {
+  page.on('request', req => {
     const u = req.url();
     if (/gameService|doSpin|doBonus|gs2c|spin|bonus|feature|purchase/i.test(u) || req.method() !== 'GET') {
       network.push(summarizeRequest(req));
     }
-  };
-  page.on('request', onRequest);
+  });
 
   const result = {
     option: purchaseOption,
@@ -440,6 +438,10 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
       for (let controlIndex = 0; controlIndex < controls.length && controlIndex < 250; controlIndex++) {
         const control = controls[controlIndex];
         const before = network.length;
+        const protocolBefore =
+          typeof provider.protocolCursor === 'function'
+            ? await provider.protocolCursor(sweepFrame).catch(() => null)
+            : null;
         const started = Date.now();
         let press;
 
@@ -452,6 +454,13 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
         await page.waitForTimeout(Math.min(Math.max(options.actionWaitMs, 250), 900));
         const delta = network.slice(before);
         const signature = trafficSignature(delta);
+        const protocol =
+          protocolBefore != null && typeof provider.protocolEvents === 'function'
+            ? await provider.protocolEvents(sweepFrame, protocolBefore).catch(() => [])
+            : [];
+        const protocolNames = protocol
+          .map(item => item?.payload?.q || item?.payload?.action || item?.payload?.command || null)
+          .filter(Boolean);
 
         result.sweep.push({
           index: controlIndex,
@@ -459,13 +468,16 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
           press,
           elapsedMs: Date.now() - started,
           traffic: signature,
+          protocol,
           network: delta
         });
 
         console.log(
           `  sweep[${controlIndex + 1}/${controls.length}] ${control.name ?? '?'} ` +
           `event=${control.event ?? '-'} ok=${Boolean(press?.ok)} ` +
-          `requests=${signature.requestCount} signals=${signature.signals.join(',') || '-'}`
+          `requests=${signature.requestCount} protocol=${protocol.length} ` +
+          `q=${[...new Set(protocolNames)].join(',') || '-'} ` +
+          `signals=${signature.signals.join(',') || '-'}`
         );
 
         // If a control navigated away, destroyed the frame or left the game runtime,
