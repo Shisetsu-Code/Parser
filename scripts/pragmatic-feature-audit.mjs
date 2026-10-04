@@ -90,6 +90,23 @@ function controlText(control) {
   ].filter(v=>v!=null).join(' ').toLowerCase();
 }
 
+function continuationProtocolKey(exchange) {
+  if (!exchange) return 'none';
+  return JSON.stringify({
+    action:exchange.action ?? null,
+    na:exchange.na ?? null,
+    fs:exchange.fs ?? null,
+    fsmax:exchange.fsmax ?? null,
+    bgid:exchange.bgid ?? null,
+    bgt:exchange.bgt ?? null,
+    end:exchange.end ?? null,
+    bw:exchange.bw ?? null,
+    ind:exchange.ind ?? null,
+    lInd:exchange.lInd ?? null
+  });
+}
+
+
 function scoreContinuation(control, exchange) {
   if (control?.active === false) return -10000;
   const text=controlText(control);
@@ -407,7 +424,8 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
           event:item.control?.event,
           purchaseIndex:item.control?.purchaseIndex,
           optionIndex:item.control?.optionIndex,
-          occurrence:item.control?.occurrence
+          occurrence:item.control?.occurrence,
+          protocolState:continuationProtocolKey(lastExchange)
         });
         if (seenControls.has(key)) return false;
         item.key=key;
