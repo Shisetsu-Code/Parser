@@ -85,8 +85,17 @@ export const threeOaks = {
           bounds: typeof obj.getBounds === 'function'
         };
         if (!Object.values(capabilities).some(Boolean) && !/(spin|buy|shop|bet|auto|rule|boost|ante)/i.test(name)) continue;
+        const economicKind = /buy_feature|ante_bet|booster/i.test(name) ? 'purchase' : null;
+        const purchaseSubtype =
+          /ante_bet/i.test(name) ? 'ante' :
+          /booster/i.test(name) ? 'booster' :
+          /buy_feature/i.test(name) ? 'bonus' :
+          null;
+
         controls.push({
           name,
+          economicKind,
+          purchaseSubtype,
           capabilities,
           state: {
             visible: safeCall(obj, 'visible'),
