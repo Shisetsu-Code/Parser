@@ -108,42 +108,69 @@ async function discoverCatalog(browser) {
     });
     await page.waitForTimeout(1500);
 
-    for (let i=0; i<35; i++) {
+    for (let i=0; i<45; i++) {
+      const before = await page.locator('a[href*="/games/"]').count().catch(()=>0);
+
+      await page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight);
+      }).catch(()=>{});
+      await page.waitForTimeout(250);
+
       const buttons = [
         page.getByRole('button',{name:/load more games/i}),
-        page.getByText(/load more games/i,{exact:true})
+        page.getByRole('link',{name:/load more games/i}),
+        page.getByText(/load more games/i,{exact:true}),
+        page.locator('button,a,[role="button"],div').filter({hasText:/^\s*load more games\s*$/i})
       ];
+
       let clicked=false;
       for (const locator of buttons) {
         try {
-          const count=await locator.count();
+          const count=Math.min(await locator.count(),10);
           for (let j=0;j<count;j++) {
             const el=locator.nth(j);
-            if (!await el.isVisible({timeout:150}).catch(()=>false)) continue;
-            await el.click({timeout:1500,force:true});
+            if (!await el.isVisible({timeout:250}).catch(()=>false)) continue;
+            await el.scrollIntoViewIfNeeded({timeout:800}).catch(()=>{});
+            await el.click({timeout:2500,force:true});
             clicked=true;
-            await page.waitForTimeout(550);
             break;
           }
         } catch {}
         if (clicked) break;
       }
+
       if (!clicked) break;
+
+      let changed=false;
+      for (let wait=0; wait<12; wait++) {
+        await page.waitForTimeout(250);
+        const after = await page.locator('a[href*="/games/"]').count().catch(()=>0);
+        if (after > before) {
+          changed=true;
+          break;
+        }
+      }
+
+      console.log('catalog load-more '+(i+1)+' before='+before+' changed='+changed);
+      if (!changed && i>2) break;
     }
 
-    const links=await page.locator('a[href]').evaluateAll(nodes => nodes.map(a => ({
-      href:a.href,
+    const links=await page.locator('a[href],[data-url],[data-href]').evaluateAll(nodes => nodes.map(a => ({
+      href:a.href || a.getAttribute('data-url') || a.getAttribute('data-href') || '',
       text:String(a.innerText||a.getAttribute('aria-label')||a.getAttribute('title')||'').trim().replace(/\s+/g,' ')
     })));
 
     const map=new Map();
     for (const item of links) {
       try {
-        const u=new URL(item.href);
+        const u=new URL(item.href,location.href);
         if (!/(^|\.)pragmaticplay\.com$/i.test(u.hostname)) continue;
-        if (!/^\/en\/games\/[^/]+\/?$/i.test(u.pathname)) continue;
-        const slug=slugFromUrl(u.toString());
-        if (!slug || EXCLUDED_SLUGS.has(slug)) continue;
+        if (!/\/games\//i.test(u.pathname)) continue;
+        const parts=u.pathname.split('/').filter(Boolean);
+        const gamesIndex=parts.findIndex(part=>part.toLowerCase()==='games');
+        if (gamesIndex<0 || !parts[gamesIndex+1]) continue;
+        const slug=parts.at(-1)?.toLowerCase() || '';
+        if (!slug || slug==='games' || EXCLUDED_SLUGS.has(slug)) continue;
         if (!map.has(slug)) {
           map.set(slug,{
             slug,
