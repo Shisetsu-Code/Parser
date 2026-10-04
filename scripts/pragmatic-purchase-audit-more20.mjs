@@ -98,93 +98,75 @@ function parsePurInit(text) {
   return { count:options.length, enabled, options };
 }
 
-async function discoverCatalog(browser) {
-  const context = await browser.newContext({viewport:{width:1440,height:900}});
-  const page = await context.newPage();
-  try {
-    await page.goto('https://www.pragmaticplay.com/en/games/', {
-      waitUntil:'domcontentloaded',
-      timeout:30000
-    });
-    await page.waitForTimeout(1500);
+const CANDIDATE_SLUGS = [
+  'sweet-bonanza',
+  'gates-of-olympus',
+  'starlight-princess',
+  'fruit-party',
+  'fruit-party-2',
+  'sugar-rush',
+  'sugar-rush-xmas',
+  'sweet-bonanza-xmas',
+  'the-dog-house-megaways',
+  'big-bass-bonanza',
+  'big-bass-splash',
+  'big-bass-hold-spinner',
+  'big-bass-floats-my-boat',
+  'big-bass-boxing-bonus-round',
+  'bigger-bass-bonanza',
+  'big-bass-bonanza-keeping-it-reel',
+  'big-bass-halloween',
+  'buffalo-king-megaways',
+  'great-rhino-megaways',
+  'madame-destiny-megaways',
+  'wild-west-gold',
+  'wild-west-gold-blazing-bounty',
+  'floating-dragon',
+  'floating-dragon-megaways',
+  'gems-bonanza',
+  'pyramid-bonanza',
+  'john-hunter-and-the-book-of-tut',
+  'john-hunter-and-the-tomb-of-the-scarab-queen',
+  'john-hunter-and-the-aztec-treasure',
+  'mustang-gold',
+  'wolf-gold',
+  'hot-fiesta',
+  'chilli-heat',
+  'aztec-gems',
+  'fire-88',
+  '888-dragons',
+  'vampires-vs-wolves',
+  'cash-elevator',
+  'empty-the-bank',
+  'hand-of-midas',
+  'rise-of-giza-powernudge',
+  'north-guardians',
+  'bounty-gold',
+  'diamond-strike',
+  'money-mouse',
+  'wild-beach-party',
+  'wild-booster',
+  'queen-of-gods',
+  'spirit-of-adventure',
+  'mysterious',
+  'wild-wild-riches',
+  'wild-wild-riches-megaways',
+  'the-great-stick-up',
+  'wild-depths',
+  'down-the-rails',
+  'cash-patrol',
+  'cash-bonanza',
+  'christmas-carol-megaways',
+  'book-of-tut-respin',
+  'drago-jewels-of-fortune'
+]
+  .filter(slug => !EXCLUDED_SLUGS.has(slug))
+  .map(slug => ({
+    slug,
+    name: slug.replace(/-/g,' '),
+    url: normalizeGameUrl('https://www.pragmaticplay.com/en/games/' + slug + '/')
+  }));
 
-    for (let i=0; i<45; i++) {
-      const before = await page.locator('a[href*="/games/"]').count().catch(()=>0);
-
-      await page.evaluate(() => {
-        window.scrollTo(0, document.body.scrollHeight);
-      }).catch(()=>{});
-      await page.waitForTimeout(250);
-
-      const buttons = [
-        page.getByRole('button',{name:/load more games/i}),
-        page.getByRole('link',{name:/load more games/i}),
-        page.getByText(/load more games/i,{exact:true}),
-        page.locator('button,a,[role="button"],div').filter({hasText:/^\s*load more games\s*$/i})
-      ];
-
-      let clicked=false;
-      for (const locator of buttons) {
-        try {
-          const count=Math.min(await locator.count(),10);
-          for (let j=0;j<count;j++) {
-            const el=locator.nth(j);
-            if (!await el.isVisible({timeout:250}).catch(()=>false)) continue;
-            await el.scrollIntoViewIfNeeded({timeout:800}).catch(()=>{});
-            await el.click({timeout:2500,force:true});
-            clicked=true;
-            break;
-          }
-        } catch {}
-        if (clicked) break;
-      }
-
-      if (!clicked) break;
-
-      let changed=false;
-      for (let wait=0; wait<12; wait++) {
-        await page.waitForTimeout(250);
-        const after = await page.locator('a[href*="/games/"]').count().catch(()=>0);
-        if (after > before) {
-          changed=true;
-          break;
-        }
-      }
-
-      console.log('catalog load-more '+(i+1)+' before='+before+' changed='+changed);
-      if (!changed && i>2) break;
-    }
-
-    const links=await page.locator('a[href],[data-url],[data-href]').evaluateAll(nodes => nodes.map(a => ({
-      href:a.href || a.getAttribute('data-url') || a.getAttribute('data-href') || '',
-      text:String(a.innerText||a.getAttribute('aria-label')||a.getAttribute('title')||'').trim().replace(/\s+/g,' ')
-    })));
-
-    const map=new Map();
-    for (const item of links) {
-      try {
-        const u=new URL(item.href,location.href);
-        if (!/(^|\.)pragmaticplay\.com$/i.test(u.hostname)) continue;
-        if (!/\/games\//i.test(u.pathname)) continue;
-        const parts=u.pathname.split('/').filter(Boolean);
-        const gamesIndex=parts.findIndex(part=>part.toLowerCase()==='games');
-        if (gamesIndex<0 || !parts[gamesIndex+1]) continue;
-        const slug=parts.at(-1)?.toLowerCase() || '';
-        if (!slug || slug==='games' || EXCLUDED_SLUGS.has(slug)) continue;
-        if (!map.has(slug)) {
-          map.set(slug,{
-            slug,
-            name:item.text || slug.replace(/-/g,' '),
-            url:normalizeGameUrl(u.toString())
-          });
-        }
-      } catch {}
-    }
-    return [...map.values()];
-  } finally {
-    await context.close();
-  }
-}
 
 async function auditRuntime(frame) {
   return frame.evaluate(() => {
@@ -234,10 +216,9 @@ async function auditRuntime(frame) {
 }
 
 const browser=await chromium.launch({headless:true});
-const catalog=await discoverCatalog(browser);
-const candidates=shuffleSeeded(catalog,'pragmatic-more20-2026-10-04-v1');
+const candidates=shuffleSeeded(CANDIDATE_SLUGS,'pragmatic-more20-2026-10-04-v2');
 
-console.log('catalog candidates after exclusions='+candidates.length);
+console.log('candidate pool after exclusions='+candidates.length);
 
 const results=[];
 const skipped=[];
@@ -325,8 +306,8 @@ await browser.close();
 
 const summary={
   generatedAt:new Date().toISOString(),
-  seed:'pragmatic-more20-2026-10-04-v1',
-  catalogCandidates:catalog.length,
+  seed:'pragmatic-more20-2026-10-04-v2',
+  catalogCandidates:candidates.length,
   total:results.length,
   pass:results.filter(x=>x.verdict==='PASS').length,
   mismatch:results.filter(x=>x.verdict==='MISMATCH').length,
