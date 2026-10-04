@@ -178,6 +178,61 @@ async function snapshotState(provider, frame) {
   catch { return null; }
 }
 
+async function waitPragmaticRuntimeReady(provider, frame, page, exchange, maxMs = 12_000) {
+  const started=Date.now();
+  let last=null;
+
+  while (Date.now()-started < maxMs) {
+    last=await snapshotState(provider,frame);
+    const rb=last?.runtimeButtons || {};
+
+    const needsInput=responseRequiresInput(exchange);
+    const featureActive=responseFeatureActive(exchange);
+
+    const actionable=
+      rb.introCloseActive === true ||
+      rb.bonusContinueActive === true ||
+      rb.freeSpinsContinueActive === true ||
+      Number(rb.activePickerCount || 0) > 0 ||
+      last?.canSpin === true ||
+      rb.spinActive === true;
+
+    const animationRunning=rb.stopActive === true;
+
+    if (!animationRunning && actionable) {
+      return {
+        ok:true,
+        waitedMs:Date.now()-started,
+        snapshot:last,
+        reason:'runtime-actionable'
+      };
+    }
+
+    if (
+      !animationRunning &&
+      !featureActive &&
+      !needsInput &&
+      last?.canSpin !== false
+    ) {
+      return {
+        ok:true,
+        waitedMs:Date.now()-started,
+        snapshot:last,
+        reason:'runtime-settled'
+      };
+    }
+
+    await page.waitForTimeout(180);
+  }
+
+  return {
+    ok:false,
+    waitedMs:Date.now()-started,
+    snapshot:last,
+    reason:'runtime-ready-timeout'
+  };
+}
+
 function terminalCandidate(exchange, snapshot) {
   if (!exchange) return false;
   if (responseFeatureActive(exchange)) return false;
@@ -373,7 +428,20 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
     for (let iteration=0; iteration<8; iteration++) {
       await Promise.allSettled([...responseTasks]);
 
-      const snapshot=await snapshotState(executionRuntime.provider,frame);
+      const runtimeReady=await waitPragmaticRuntimeReady(
+        executionRuntime.provider,
+        frame,
+        page,
+        lastExchange,
+        12_000
+      );
+      const snapshot=runtimeReady.snapshot ?? await snapshotState(executionRuntime.provider,frame);
+
+      result.steps.push({
+        kind:'runtime-ready',
+        iteration,
+        ready:runtimeReady
+      });
 
       if (terminalCandidate(lastExchange,snapshot)) {
         // Give automatic feature activity one final chance before declaring terminal.
@@ -398,52 +466,52 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
         }
       }
 
-      // A purchased free-spin feature often enters an intro/interstitial first.
-      // The server already reports fs>0, but CanSpin remains false until the
-      // runtime receives ConfirmFSStart. Try that canonical event before Spin.
       const lastNa=String(lastExchange?.na||'').toLowerCase();
       const lastFs=numberOrNull(lastExchange?.fs);
       const lastFsMax=numberOrNull(lastExchange?.fsmax);
+      const rb=snapshot?.runtimeButtons || {};
 
-      if (
-        lastNa==='s' &&
-        lastFs!=null &&
-        lastFs>0 &&
-        snapshot?.canSpin===false
-      ) {
-        const beforeConfirm=responses.length;
-        const press=await executionRuntime.provider.press(frame,'confirm_fs_start').catch(error=>({
+      // Runtime interstitials have priority over forcing another spin.
+      // They are only used when the runtime marks the corresponding control active.
+      const runtimeInterstitial =
+        rb.introCloseActive === true
+          ? 'intro_close_pressed'
+          : rb.bonusContinueActive === true
+            ? 'bonus_rounds_on_continue_pressed'
+            : null;
+
+      if (runtimeInterstitial) {
+        const beforeContinue=responses.length;
+        const press=await executionRuntime.provider.press(frame,runtimeInterstitial).catch(error=>({
           ok:false,
           reason:String(error?.message||error)
         }));
         const wait=await waitGameplayQuiet(page,responses,{
-          maxMs:3600,
-          quietMs:1100,
+          maxMs:4200,
+          quietMs:1200,
           minMs:350
         });
         await Promise.allSettled([...responseTasks]);
-        const fresh=responses.slice(beforeConfirm)
+        const fresh=responses.slice(beforeContinue)
           .map(parsedExchange)
           .filter(x=>['doSpin','doBonus','doCollect'].includes(x.action));
         if (fresh.length) lastExchange=fresh.at(-1);
+
         result.steps.push({
-          kind:'protocol-confirm-fs-start',
+          kind:'runtime-interstitial',
           iteration,
+          action:runtimeInterstitial,
           press,
           responses:fresh,
           wait
         });
 
-        // ConfirmFSStart can either immediately trigger the first continuation
-        // request or just unlock the next Spin. Re-read runtime state either way.
-        const afterConfirmSnapshot=await snapshotState(executionRuntime.provider,frame);
         if (fresh.length) {
           lastResponseIndex=responses.length;
           continue;
         }
-        if (press?.ok && afterConfirmSnapshot?.canSpin===true) {
-          // Fall through to protocol-spin below.
-        }
+
+        // If the interstitial merely unlocks the next spin, continue below.
       }
 
       // Protocol-first continuation: Pragmatic may keep the visible Spin
@@ -458,7 +526,14 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
           (lastExchange?.trail!=null && /pending|feature/i.test(String(lastExchange.trail)))
         );
 
-      if (protocolSpinActive) {
+      if (
+        protocolSpinActive &&
+        snapshot?.runtimeButtons?.stopActive !== true &&
+        (
+          snapshot?.canSpin === true ||
+          snapshot?.runtimeButtons?.spinActive === true
+        )
+      ) {
         const beforeProtocolSpin=responses.length;
         const press=await executionRuntime.provider.press(frame,'spin').catch(error=>({
           ok:false,
@@ -569,6 +644,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
           reason:'no continuation control',
           snapshot,
           exchange:lastExchange,
+          runtimeReady,
           controls:(await executionRuntime.provider.listControls(frame).catch(()=>[]))
             .slice(0,120)
             .map(control=>({
