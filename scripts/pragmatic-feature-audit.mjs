@@ -363,6 +363,14 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
       result.preBaseSelection={selection,press,phase:'discovery'};
       if (!press?.ok) throw new Error('pre-base selection press failed: '+(press?.reason||'unknown'));
       await page.waitForTimeout(600);
+
+      const refreshedDiscoveryRuntime=await findRuntime(page,10000).catch(()=>null);
+      if (
+        refreshedDiscoveryRuntime?.provider?.id === 'pragmatic'
+      ) {
+        frame=refreshedDiscoveryRuntime.frame;
+      }
+
       discoveryReady=await provider.waitReady?.(frame,10000).catch(()=>null);
       if (!discoveryReady?.ok) {
         throw new Error('discovery base state not ready after pre-base selection: '+(discoveryReady?.reason||'unknown'));
@@ -402,7 +410,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
     await page.waitForTimeout(2200);
     await bootstrapSupportedPage(page);
 
-    const executionRuntime=await findRuntime(page,30000);
+    let executionRuntime=await findRuntime(page,30000);
     if(!executionRuntime || executionRuntime.provider.id!=='pragmatic') {
       throw new Error('Pragmatic runtime not found for clean purchase execution');
     }
@@ -434,6 +442,15 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
       }
 
       await page.waitForTimeout(600);
+
+      const refreshedExecutionRuntime=await findRuntime(page,10000).catch(()=>null);
+      if (
+        refreshedExecutionRuntime?.provider?.id === 'pragmatic'
+      ) {
+        executionRuntime=refreshedExecutionRuntime;
+        frame=executionRuntime.frame;
+      }
+
       executionReady=await executionRuntime.provider.waitReady?.(frame,10000).catch(()=>null);
     }
 
