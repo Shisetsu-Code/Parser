@@ -84,12 +84,14 @@ export const threeOaks = {
           pointer: typeof obj.pointerdown === 'function' || typeof obj.pointerup === 'function',
           bounds: typeof obj.getBounds === 'function'
         };
-        if (!Object.values(capabilities).some(Boolean) && !/(spin|buy|shop|bet|auto|rule|boost|ante)/i.test(name)) continue;
-        const economicKind = /buy_feature|ante_bet|booster/i.test(name) ? 'purchase' : null;
+        if (!Object.values(capabilities).some(Boolean) && !/(spin|buy|shop|bet|auto|rule|boost|ante|chance|super.?spin|enhanced.?spin)/i.test(name)) continue;
+        const economicKind = /buy_feature|ante_bet|booster|chance|super.?spin|enhanced.?spin/i.test(name) ? 'purchase' : null;
         const purchaseSubtype =
-          /ante_bet/i.test(name) ? 'ante' :
+          /ante_bet/i.test(name) ? 'ante_bet' :
           /booster/i.test(name) ? 'booster' :
-          /buy_feature/i.test(name) ? 'bonus' :
+          /super.?spin|enhanced.?spin/i.test(name) ? 'super_spin' :
+          /chance/i.test(name) ? 'chance' :
+          /buy_feature/i.test(name) ? 'buy_feature' :
           null;
 
         controls.push({
@@ -206,6 +208,55 @@ export const threeOaks = {
         meta: simplify(value)
       }));
     });
+  },
+
+  async listEconomicPurchases(frame) {
+    const direct = await this.listPurchases(frame).catch(() => []);
+    const scan = await this.scan(frame).catch(() => ({ controls: [] }));
+    const out = [];
+
+    for (const option of direct) {
+      out.push({
+        id: 'buy_feature:' + String(option.index),
+        economicKind: 'purchase',
+        subtype: 'buy_feature',
+        execution: 'feature_purchase_index',
+        index: option.index,
+        ordinal: option.ordinal,
+        available: option.available !== false,
+        cost: option?.meta?.price ?? option?.meta?.cost ?? null,
+        raw: option
+      });
+    }
+
+    const seen = new Set();
+    for (const control of scan?.controls || []) {
+      if (control?.economicKind !== 'purchase') continue;
+      const subtype = String(control?.purchaseSubtype || '');
+      if (!subtype || subtype === 'buy_feature') continue;
+
+      const key = [subtype, control?.name ?? ''].join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      out.push({
+        id: 'runtime:' + key,
+        economicKind: 'purchase',
+        subtype,
+        execution: 'runtime_control',
+        available: control?.state?.disabled !== true,
+        selected: control?.state?.selected ?? null,
+        cost: control?.state?.price ?? null,
+        control: {
+          kind: 'GR.UI.view',
+          name: control?.name ?? null,
+          active: control?.state?.disabled !== true
+        },
+        raw: control
+      });
+    }
+
+    return out;
   },
 
   async purchase(frame, index) {
