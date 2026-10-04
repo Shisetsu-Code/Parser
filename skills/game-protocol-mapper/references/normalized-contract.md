@@ -11,11 +11,17 @@ type NormalizedProviderState = {
   automaticActivity: boolean | null;
   selectionRequired: boolean | null;
   availableActions: NormalizedAction[];
+  configuration?: {
+    structural?: boolean;
+    dimensions?: Record<string, string | number | boolean | null>;
+    derived?: Record<string, string | number | boolean | null>;
+  } | null;
   stateToken?: string | null;
   roundId?: string | number | null;
   purchase?: {
     baseName?: string | null;
     selector?: Record<string, unknown>;
+    confirmRequired?: boolean | null;
     raw?: unknown;
   } | null;
   raw: unknown;
@@ -23,7 +29,7 @@ type NormalizedProviderState = {
 
 type NormalizedAction = {
   name: string;
-  kind: "spin" | "respin" | "freespin" | "bonus" | "pick" | "confirm" | "collect" | "continue" | "unknown";
+  kind: "configure" | "spin" | "respin" | "freespin" | "purchase-select" | "purchase-confirm" | "bonus" | "pick" | "confirm" | "collect" | "continue" | "unknown";
   selector?: Record<string, unknown>;
   raw?: unknown;
 };
@@ -80,3 +86,40 @@ Examples:
 - launch tokens
 - Pragmatic mgckey session
 - Belatra sid
+
+
+## Structural configuration contract
+
+If configuration is structural, the tree crawler must treat each distinct dimension value as a distinct replay state.
+
+Observed example:
+```json
+{
+  "configuration": {
+    "structural": true,
+    "dimensions": {"nlines": 10},
+    "derived": {"betPerLine": 1, "betPerGame": 10}
+  }
+}
+```
+
+Changing a configuration value is an action and should have a replay descriptor such as:
+```json
+{
+  "kind": "BELATRA_CONFIG",
+  "configKey": "nlines",
+  "configValue": 10
+}
+```
+
+## Provider protocol-event contract
+
+Providers may expose semantic client-side events that exist before network serialization.
+
+Optional adapter methods:
+```ts
+protocolCursor(frame): Promise<number | null>
+protocolEvents(frame, since: number): Promise<unknown[]>
+```
+
+Tree edges should retain these events separately from raw network requests.
