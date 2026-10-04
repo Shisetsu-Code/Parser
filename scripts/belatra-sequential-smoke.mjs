@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
-import path from 'node:path';
 
 const games = [
   ['01-20-super-stars', 'https://free-slot.belatragames.com/play/20-super-stars'],
@@ -16,57 +15,39 @@ const games = [
   ['10-book-of-doom', 'https://free-slot.belatragames.com/play/book-of-doom']
 ];
 
-const root = path.resolve('results-belatra-sequential');
-await fs.rm(root, { recursive: true, force: true });
-await fs.mkdir(root, { recursive: true });
+const targets = games
+  .map(([, url]) => url + ' | tree_all')
+  .join('\n') + '\n';
 
-function runOne(id, url) {
-  return new Promise(resolve => {
-    const child = spawn(process.execPath, [
-      'src/index.js',
-      '--headed',
-      '--targets', 'target.txt',
-      '--timeout', '30000',
-      '--settle', '2200',
-      '--action-wait', '450',
-      '--tree-max-depth', '3',
-      '--tree-max-states', '8',
-      '--tree-max-edges', '20',
-      '--tree-max-controls', '16',
-      '--tree-auto-wait', '5000',
-      '--tree-quiet', '800',
-      '--tree-repeat-limit', '10'
-    ], { stdio: 'inherit' });
+const targetFile = 'targets-belatra-sequential.txt';
+await fs.writeFile(targetFile, targets, 'utf8');
 
-    child.on('exit', code => resolve(code ?? 1));
-  });
-}
+console.log('Belatra sequential smoke:');
+console.log('- one Chromium process');
+console.log('- one BrowserContext');
+console.log('- one page');
+console.log('- games and tree branches are navigated strictly one at a time');
+console.log('- Cloudflare clearance is preserved in the shared context');
+console.log('- if a challenge appears, solve it in the visible browser; Parser waits for runtime');
 
-let anyFailed = false;
+const child = spawn(process.execPath, [
+  'src/index.js',
+  '--headed',
+  '--reuse-context',
+  '--targets', targetFile,
+  '--timeout', '120000',
+  '--settle', '2200',
+  '--action-wait', '450',
+  '--tree-max-depth', '3',
+  '--tree-max-states', '8',
+  '--tree-max-edges', '20',
+  '--tree-max-controls', '16',
+  '--tree-auto-wait', '5000',
+  '--tree-quiet', '800',
+  '--tree-repeat-limit', '10'
+], { stdio: 'inherit' });
 
-for (const [id, url] of games) {
-  console.log('\n===== BEGIN ' + id + ' =====');
-
-  await fs.rm('results', { recursive: true, force: true });
-  await fs.writeFile('target.txt', url + ' | tree_all\n', 'utf8');
-
-  // Strictly one Parser/Chromium process at a time.
-  // The next game cannot begin until the prior process has exited.
-  const code = await runOne(id, url);
-
-  const dest = path.join(root, id);
-  await fs.mkdir(dest, { recursive: true });
-  try {
-    await fs.cp('results', dest, { recursive: true });
-  } catch {}
-  await fs.writeFile(path.join(dest, 'exit-code.txt'), String(code), 'utf8');
-
-  console.log('===== END ' + id + ' rc=' + code + ' =====');
-
-  if (code !== 0) anyFailed = true;
-
-  // Explicit provider cooldown between complete Chromium sessions.
-  await new Promise(resolve => setTimeout(resolve, 2000));
-}
-
-process.exitCode = anyFailed ? 1 : 0;
+child.on('exit', async code => {
+  try { await fs.rm(targetFile, { force: true }); } catch {}
+  process.exitCode = code ?? 1;
+});
