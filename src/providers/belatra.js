@@ -1,0 +1,385 @@
+import { genericCanvas } from './generic-canvas.js';
+
+const MODULES = {
+  data: 2731,
+  unitmng: 9337,
+  ajaxQueue: 1129
+};
+
+async function ensureHook(frame) {
+  return frame.evaluate(({ MODULES }) => {
+    const req = globalThis.all_content;
+    if (typeof req !== 'function') return { ok: false, reason: 'all_content unavailable' };
+
+    let dataMod, unitMod, ajaxMod;
+    try {
+      dataMod = req(MODULES.data);
+      unitMod = req(MODULES.unitmng);
+      ajaxMod = req(MODULES.ajaxQueue);
+    } catch (error) {
+      return { ok: false, reason: String(error?.message || error) };
+    }
+
+    const data = dataMod?.data;
+    const unitmng = unitMod?.unitmng;
+    const ajaxQueue = ajaxMod?.ajaxQueue;
+    if (!data || !unitmng) return { ok: false, reason: 'validated Belatra modules unavailable' };
+
+    const cloneSafe = value => {
+      const seen = new WeakSet();
+      try {
+        return JSON.parse(JSON.stringify(value, (key, current) => {
+          if (/^(sid|session|token|auth|key|launch_token)$/i.test(String(key))) return '[redacted]';
+          if (typeof current === 'function') return undefined;
+          if (current && typeof current === 'object') {
+            if (seen.has(current)) return '[circular]';
+            seen.add(current);
+          }
+          return current;
+        }));
+      } catch {
+        return null;
+      }
+    };
+
+    globalThis.__parserBelatraProtocol ||= [];
+
+    if (ajaxQueue && typeof ajaxQueue.post === 'function' && !ajaxQueue.__parserWrappedPost) {
+      const original = ajaxQueue.post;
+      Object.defineProperty(ajaxQueue, '__parserWrappedPost', { value: true, configurable: true });
+      Object.defineProperty(ajaxQueue, '__parserOriginalPost', { value: original, configurable: true });
+
+      ajaxQueue.post = function(payload, ...rest) {
+        try {
+          const event = {
+            seq: globalThis.__parserBelatraProtocol.length,
+            at: Date.now(),
+            payload: cloneSafe(payload)
+          };
+          globalThis.__parserBelatraProtocol.push(event);
+          if (globalThis.__parserBelatraProtocol.length > 1000) {
+            globalThis.__parserBelatraProtocol.splice(0, 250);
+          }
+        } catch {}
+        return original.call(this, payload, ...rest);
+      };
+    }
+
+    const game = unitmng.tGame;
+    if (game && typeof game.show_BuyBonusBanner === 'function' && !game.__parserWrappedBuyBanner) {
+      const originalShow = game.show_BuyBonusBanner;
+      Object.defineProperty(game, '__parserWrappedBuyBanner', { value: true, configurable: true });
+      game.show_BuyBonusBanner = function(...args) {
+        const banner = originalShow.apply(this, args);
+        globalThis.__parserBelatraBuyBanner = banner || null;
+        return banner;
+      };
+    }
+
+    return {
+      ok: true,
+      hasAjaxHook: Boolean(ajaxQueue?.__parserWrappedPost),
+      hasBuyBannerHook: Boolean(game?.__parserWrappedBuyBanner)
+    };
+  }, { MODULES }).catch(error => ({ ok: false, reason: String(error?.message || error) }));
+}
+
+async function runtimeInfo(frame) {
+  await ensureHook(frame);
+  return frame.evaluate(({ MODULES }) => {
+    const req = globalThis.all_content;
+    if (typeof req !== 'function') return null;
+
+    try {
+      const data = req(MODULES.data)?.data;
+      const unitmng = req(MODULES.unitmng)?.unitmng;
+      const game = unitmng?.tGame;
+      const gs = data?.gs;
+      if (!data || !game || !gs) return null;
+
+      const simple = value => {
+        if (value == null || ['string', 'number', 'boolean'].includes(typeof value)) return value ?? null;
+        return null;
+      };
+
+      const shallow = object => {
+        if (!object || typeof object !== 'object') return null;
+        const out = {};
+        for (const [key, value] of Object.entries(object)) {
+          const v = simple(value);
+          if (v !== null || value === null) out[key] = v;
+          else if (Array.isArray(value)) out[key] = { length: value.length };
+        }
+        return out;
+      };
+
+      const banner = globalThis.__parserBelatraBuyBanner || null;
+      const buyButtons = Array.isArray(banner?.buyButtons) ? banner.buyButtons : [];
+      const selectedBuy = Number.isFinite(Number(game.justBuyBonusSelectType))
+        ? Number(game.justBuyBonusSelectType)
+        : null;
+
+      return {
+        runtimeVersion: 'all_content-webpack',
+        moduleIds: MODULES,
+        configuration: {
+          useBetDependOnLines: game.useBetDependOnLines === true,
+          nlines: simple(gs.nlines),
+          linesAssortment: Array.isArray(gs.linesAssortment) ? gs.linesAssortment.slice(0, 100) : [],
+          betPerLine: simple(gs.betPerLine),
+          betPerGame: simple(gs.betPerGame),
+          betAssortment: Array.isArray(gs.betAssortment) ? gs.betAssortment.slice(0, 100) : []
+        },
+        purchase: {
+          selectedOption: selectedBuy,
+          autoBuyOption: simple(game.justBuyBonusSelectType_AUTOBUY),
+          bannerOpen: Boolean(banner?.popup || banner?.buyButtons || banner?.but_ok),
+          optionCount: buyButtons.length,
+          confirmAvailable: Boolean(banner?.but_ok),
+          cancelAvailable: Boolean(banner?.but_no),
+          betIncreaseAvailable: Boolean(banner?.but_plus),
+          betDecreaseAvailable: Boolean(banner?.but_minus),
+          buyBonus: shallow(gs.buyBonus)
+        },
+        feature: {
+          freespin: simple(game.freespin),
+          waitBanner: simple(game.waitBanner),
+          reelstate: simple(gs.reelstate),
+          flags: simple(gs.flags),
+          userAction: simple(gs.userAction),
+          freeInfo: shallow(gs.freeInfo),
+          respinInfo: shallow(gs.respinInfo),
+          subGameInfo: shallow(gs.subGameInfo),
+          jpsubGameInfo: shallow(gs.jpsubGameInfo)
+        }
+      };
+    } catch {
+      return null;
+    }
+  }, { MODULES }).catch(() => null);
+}
+
+function buyControl(index, selected) {
+  return {
+    kind: 'BELATRA_BUY_OPTION',
+    name: `buy_option_${index}`,
+    optionIndex: index,
+    active: true,
+    state: { selected: selected === index }
+  };
+}
+
+export const belatra = {
+  id: 'belatra',
+
+  async detect(frame, page) {
+    let allowed = false;
+    try {
+      const top = new URL(page.url()).hostname;
+      const own = new URL(frame.url()).hostname;
+      allowed =
+        /(^|\.)(belatragames\.com|bltrm\.com)$/i.test(top) ||
+        /(^|\.)(belatragames\.com|bltrm\.com)$/i.test(own);
+    } catch {}
+    if (!allowed) return false;
+
+    const detected = await frame.evaluate(({ MODULES }) => {
+      if (typeof globalThis.all_content !== 'function') return false;
+      try {
+        const data = globalThis.all_content(MODULES.data)?.data;
+        const unitmng = globalThis.all_content(MODULES.unitmng)?.unitmng;
+        return Boolean(data?.gs && unitmng?.tGame);
+      } catch {
+        return false;
+      }
+    }, { MODULES }).catch(() => false);
+
+    if (detected) await ensureHook(frame);
+    return detected;
+  },
+
+  async isDemo(frame) {
+    return frame.evaluate(() => /(^|\.)(demo\.)?bltrm\.com$/i.test(location.hostname)).catch(() => false);
+  },
+
+  async stateSnapshot(frame) {
+    return runtimeInfo(frame);
+  },
+
+  async protocolCursor(frame) {
+    await ensureHook(frame);
+    return frame.evaluate(() => globalThis.__parserBelatraProtocol?.length ?? 0).catch(() => 0);
+  },
+
+  async protocolEvents(frame, since = 0) {
+    await ensureHook(frame);
+    return frame.evaluate(start => {
+      const events = globalThis.__parserBelatraProtocol || [];
+      return events.slice(Math.max(0, Number(start) || 0));
+    }, since).catch(() => []);
+  },
+
+  async scan(frame) {
+    return { ready: true, controls: await this.listControls(frame) };
+  },
+
+  async listControls(frame) {
+    await ensureHook(frame);
+    const base = await genericCanvas.listControls(frame);
+    const info = await runtimeInfo(frame);
+    if (!info) return base;
+
+    const extra = [];
+    const cfg = info.configuration || {};
+
+    if (cfg.useBetDependOnLines && Array.isArray(cfg.linesAssortment) && cfg.linesAssortment.length > 1) {
+      for (const value of cfg.linesAssortment) {
+        if (Number(value) === Number(cfg.nlines)) continue;
+        extra.push({
+          kind: 'BELATRA_CONFIG',
+          name: `config_lines_${value}`,
+          configKey: 'nlines',
+          configValue: Number(value),
+          active: true,
+          state: {
+            selected: false,
+            text: String(value)
+          }
+        });
+      }
+    }
+
+    const purchase = info.purchase || {};
+    if (purchase.bannerOpen && Number(purchase.optionCount) > 0) {
+      for (let index = 0; index < Number(purchase.optionCount); index++) {
+        extra.push(buyControl(index, purchase.selectedOption));
+      }
+    }
+
+    if (purchase.confirmAvailable) {
+      extra.push({
+        kind: 'BELATRA_BUY_CONFIRM',
+        name: 'buy_confirm',
+        active: true,
+        state: { selected: purchase.selectedOption }
+      });
+    }
+    if (purchase.betIncreaseAvailable) {
+      extra.push({ kind: 'BELATRA_BUY_BET', name: 'buy_bet_inc', method: 'inc', active: true });
+    }
+    if (purchase.betDecreaseAvailable) {
+      extra.push({ kind: 'BELATRA_BUY_BET', name: 'buy_bet_dec', method: 'dec', active: true });
+    }
+
+    // Prefer exact runtime controls over generic canvas fallbacks.
+    return [...extra, ...base];
+  },
+
+  async pressControl(frame, control) {
+    await ensureHook(frame);
+
+    if (control?.kind === 'BELATRA_CONFIG' && control?.configKey === 'nlines') {
+      return frame.evaluate(({ MODULES, target }) => {
+        try {
+          const data = globalThis.all_content(MODULES.data)?.data;
+          const unitmng = globalThis.all_content(MODULES.unitmng)?.unitmng;
+          const game = unitmng?.tGame;
+          const panel = game?.panelBot;
+          const assortment = data?.gs?.linesAssortment;
+          if (!game || !panel || !Array.isArray(assortment)) {
+            return { ok: false, reason: 'Belatra line runtime unavailable' };
+          }
+
+          const targetIndex = assortment.findIndex(v => Number(v) === Number(target));
+          if (targetIndex < 0) return { ok: false, reason: 'Requested line value unavailable' };
+
+          for (let guard = 0; guard < assortment.length + 2; guard++) {
+            const current = Number(data.gs.nlines);
+            if (current === Number(target)) {
+              return {
+                ok: true,
+                strategy: 'panelBot.onLinesInc/onLinesDec',
+                configKey: 'nlines',
+                configValue: Number(target),
+                betPerLine: data.gs.betPerLine,
+                betPerGame: data.gs.betPerGame
+              };
+            }
+
+            const currentIndex = assortment.findIndex(v => Number(v) === current);
+            if (currentIndex < 0) return { ok: false, reason: 'Current line value not in assortment' };
+
+            if (currentIndex < targetIndex && typeof panel.onLinesInc === 'function') panel.onLinesInc();
+            else if (currentIndex > targetIndex && typeof panel.onLinesDec === 'function') panel.onLinesDec();
+            else return { ok: false, reason: 'Line control method unavailable' };
+          }
+
+          return { ok: false, reason: 'Line configuration guard exhausted' };
+        } catch (error) {
+          return { ok: false, reason: String(error?.message || error) };
+        }
+      }, { MODULES, target: control.configValue });
+    }
+
+    if (control?.kind === 'BELATRA_BUY_OPTION') {
+      return frame.evaluate(index => {
+        const banner = globalThis.__parserBelatraBuyBanner;
+        if (!banner) return { ok: false, reason: 'Buy banner unavailable' };
+        const button =
+          (typeof banner.getBuyButton === 'function' ? banner.getBuyButton(index) : null) ||
+          banner.buyButtons?.[index];
+        if (!button) return { ok: false, reason: 'Buy option unavailable' };
+
+        try {
+          if (typeof button.doAction === 'function') button.doAction();
+          else if (typeof button.onDown === 'function') button.onDown();
+          else return { ok: false, reason: 'Buy option has no invocable action' };
+
+          return {
+            ok: true,
+            strategy: 'Belatra buy banner option',
+            optionIndex: Number(index)
+          };
+        } catch (error) {
+          return { ok: false, reason: String(error?.message || error) };
+        }
+      }, Number(control.optionIndex));
+    }
+
+    if (control?.kind === 'BELATRA_BUY_CONFIRM') {
+      return frame.evaluate(() => {
+        const banner = globalThis.__parserBelatraBuyBanner;
+        if (!banner) return { ok: false, reason: 'Buy banner unavailable' };
+        try {
+          if (typeof banner.but_ok?.doAction === 'function') banner.but_ok.doAction();
+          else if (typeof banner.exitt === 'function') banner.exitt(true);
+          else return { ok: false, reason: 'Buy confirm action unavailable' };
+          return { ok: true, strategy: 'Belatra buy banner confirm' };
+        } catch (error) {
+          return { ok: false, reason: String(error?.message || error) };
+        }
+      });
+    }
+
+    if (control?.kind === 'BELATRA_BUY_BET') {
+      return frame.evaluate(method => {
+        const banner = globalThis.__parserBelatraBuyBanner;
+        if (!banner) return { ok: false, reason: 'Buy banner unavailable' };
+        const button = method === 'inc' ? banner.but_plus : banner.but_minus;
+        try {
+          if (typeof button?.doAction === 'function') button.doAction();
+          else {
+            const fallback = method === 'inc' ? banner.betCostInc : banner.betCostDec;
+            if (typeof fallback !== 'function') return { ok: false, reason: 'Buy bet control unavailable' };
+            fallback.call(banner);
+          }
+          return { ok: true, strategy: 'Belatra buy-banner bet control', method };
+        } catch (error) {
+          return { ok: false, reason: String(error?.message || error) };
+        }
+      }, control.method);
+    }
+
+    return genericCanvas.pressControl(frame, control);
+  }
+};
