@@ -1,0 +1,97 @@
+name: Belatra sequential ten-game smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/belatra-sequential-ten.yml"
+
+jobs:
+  belatra-sequential:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+
+      - name: Run 10 Belatra games strictly sequentially
+        shell: bash
+        run: |
+          set +e
+          mkdir -p sequential-results
+          cat > /tmp/belatra-games.tsv <<'EOF'
+          01-20-super-stars	https://free-slot.belatragames.com/play/20-super-stars
+          02-3x-super-peppers	https://free-slot.belatragames.com/play/3x-super-peppers
+          03-5-wild-wild-peppers	https://free-slot.belatragames.com/play/5-wild-wild-peppers
+          04-500-juicy-fruits	https://free-slot.belatragames.com/play/500-juicy-fruits
+          05-7-days-spanish-armada	https://free-slot.belatragames.com/play/7-days-the-spanish-armada
+          06-88-bingo-88	https://free-slot.belatragames.com/play/88-bingo-88
+          07-88-dragons-bounty	https://free-slot.belatragames.com/play/88-dragons-bounty
+          08-88-golden-88	https://free-slot.belatragames.com/play/88-golden-88
+          09-big-bang	https://free-slot.belatragames.com/play/big-bang
+          10-book-of-doom	https://free-slot.belatragames.com/play/book-of-doom
+          EOF
+
+          overall=0
+          while IFS=$'\t' read -r id url; do
+            echo "===== BEGIN $id ====="
+            rm -rf results
+            printf '%s | tree_all\n' "$url" > target.txt
+
+            # One complete Parser process per game. Chromium exits before the next
+            # game begins, so Belatra never has two DEMO games running concurrently.
+            node src/index.js \
+              --headless \
+              --targets target.txt \
+              --timeout 25000 \
+              --settle 2200 \
+              --action-wait 450 \
+              --tree-max-depth 3 \
+              --tree-max-states 8 \
+              --tree-max-edges 20 \
+              --tree-max-controls 16 \
+              --tree-auto-wait 5000 \
+              --tree-quiet 800 \
+              --tree-repeat-limit 10
+            rc=$?
+
+            mkdir -p "sequential-results/$id"
+            cp -R results/. "sequential-results/$id/" 2>/dev/null || true
+            echo "$rc" > "sequential-results/$id/exit-code.txt"
+            echo "===== END $id rc=$rc ====="
+
+            # Explicit gap after Chromium has exited before next Belatra DEMO.
+            sleep 2
+
+            if [ "$rc" -ne 0 ]; then
+              overall=1
+            fi
+          done < /tmp/belatra-games.tsv
+
+          exit "$overall"
+
+      - name: Print compact summaries
+        if: always()
+        shell: bash
+        run: |
+          for d in sequential-results/*; do
+            [ -d "$d" ] || continue
+            echo "===== $(basename "$d") ====="
+            cat "$d/summary.json" 2>/dev/null || true
+            grep -R -E 'provider=|controls=|tree state=|tree edge=|tree done|protocol=|replayFailures|runtimeDebug|ERROR:' "$d" 2>/dev/null | tail -n 100 || true
+          done
+
+      - name: Upload sequential evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: belatra-sequential-ten
+          path: sequential-results
+          if-no-files-found: warn
+          retention-days: 7
