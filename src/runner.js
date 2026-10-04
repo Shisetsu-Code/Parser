@@ -324,15 +324,17 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
     return result;
   }
 
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = await context.newPage();
+  const ownsContext = !sharedSession;
+  const context = sharedSession?.context ?? await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = sharedSession?.page ?? await context.newPage();
   const network = [];
-  page.on('request', req => {
+  const onRequest = req => {
     const u = req.url();
     if (/gameService|doSpin|doBonus|gs2c|spin|bonus|feature|purchase/i.test(u) || req.method() !== 'GET') {
       network.push(summarizeRequest(req));
     }
-  });
+  };
+  page.on('request', onRequest);
 
   console.log(`\n[${index}/${total}] ${url}`);
   try {
@@ -369,7 +371,8 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
       throw new Error('No supported runtime found in page/frames');
     }
 
-    const { provider, frame } = runtime;
+    const provider = runtime.provider;
+    let frame = runtime.frame;
     result.provider = provider.id;
     result.frameUrl = frame.url();
     const frameDemo = await provider.isDemo(frame);
