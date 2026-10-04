@@ -279,42 +279,188 @@ export const belatra = {
     await ensureHook(frame);
 
     if (control?.kind === 'BELATRA_CONFIG' && control?.configKey === 'nlines') {
-      return frame.evaluate(({ MODULES, target }) => {
+      return frame.evaluate(async ({ MODULES, target }) => {
         try {
           const data = globalThis.all_content(MODULES.data)?.data;
           const unitmng = globalThis.all_content(MODULES.unitmng)?.unitmng;
           const game = unitmng?.tGame;
           const panel = game?.panelBot;
           const assortment = data?.gs?.linesAssortment;
-          if (!game || !panel || !Array.isArray(assortment)) {
+
+          if (!game || !Array.isArray(assortment)) {
             return { ok: false, reason: 'Belatra line runtime unavailable' };
           }
 
-          const targetIndex = assortment.findIndex(v => Number(v) === Number(target));
-          if (targetIndex < 0) return { ok: false, reason: 'Requested line value unavailable' };
+          const targetNumber = Number(target);
+          const targetIndex = assortment.findIndex(v => Number(v) === targetNumber);
+          if (targetIndex < 0) {
+            return { ok: false, reason: 'Requested line value unavailable', target: targetNumber };
+          }
 
-          for (let guard = 0; guard < assortment.length + 2; guard++) {
-            const current = Number(data.gs.nlines);
-            if (current === Number(target)) {
+          const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+          const propertyNames = object => {
+            const names = new Set();
+            let current = object;
+            for (let depth = 0; current && depth < 5; depth++) {
+              for (const name of Object.getOwnPropertyNames(current)) names.add(name);
+              current = Object.getPrototypeOf(current);
+            }
+            return [...names];
+          };
+
+          const sources = [
+            ['panelBot', panel],
+            ['game', game]
+          ].filter(([, object]) => object && typeof object === 'object');
+
+          const available = [];
+          const candidates = [];
+
+          for (const [sourceName, object] of sources) {
+            for (const name of propertyNames(object)) {
+              if (!/line/i.test(name)) continue;
+
+              let value;
+              try { value = object[name]; } catch { continue; }
+
+              if (typeof value === 'function') {
+                available.push(sourceName + '.' + name + '()');
+                candidates.push({
+                  sourceName,
+                  name,
+                  kind: 'function',
+                  object,
+                  invoke: argument => value.call(object, argument)
+                });
+                continue;
+              }
+
+              if (!value || typeof value !== 'object') continue;
+
+              for (const method of ['doAction', 'onDown', 'onClick', 'click']) {
+                if (typeof value[method] !== 'function') continue;
+                available.push(sourceName + '.' + name + '.' + method + '()');
+                candidates.push({
+                  sourceName,
+                  name,
+                  kind: 'object-action',
+                  method,
+                  object: value,
+                  invoke: () => value[method]()
+                });
+              }
+            }
+          }
+
+          const directionScore = (candidate, direction) => {
+            const text = (candidate.sourceName + ' ' + candidate.name + ' ' + (candidate.method || '')).toLowerCase();
+            let score = /line/.test(text) ? 20 : 0;
+
+            if (direction > 0) {
+              if (/(inc|plus|next|up|more|add)/.test(text)) score += 80;
+              if (/(dec|minus|prev|down|less|sub)/.test(text)) score -= 100;
+            } else {
+              if (/(dec|minus|prev|down|less|sub)/.test(text)) score += 80;
+              if (/(inc|plus|next|up|more|add)/.test(text)) score -= 100;
+            }
+
+            if (/(set.*line|line.*set)/.test(text)) score += 30;
+            if (/change.*line|line.*change/.test(text)) score += 20;
+            return score;
+          };
+
+          const attempts = [];
+
+          for (let guard = 0; guard < assortment.length + 3; guard++) {
+            const currentValue = Number(data.gs.nlines);
+
+            if (currentValue === targetNumber) {
               return {
                 ok: true,
-                strategy: 'panelBot.onLinesInc/onLinesDec',
+                strategy: 'dynamic Belatra line runtime',
                 configKey: 'nlines',
-                configValue: Number(target),
+                configValue: targetNumber,
                 betPerLine: data.gs.betPerLine,
-                betPerGame: data.gs.betPerGame
+                betPerGame: data.gs.betPerGame,
+                attempts,
+                availableLineControls: available.slice(0, 80)
               };
             }
 
-            const currentIndex = assortment.findIndex(v => Number(v) === current);
-            if (currentIndex < 0) return { ok: false, reason: 'Current line value not in assortment' };
+            const currentIndex = assortment.findIndex(v => Number(v) === currentValue);
+            if (currentIndex < 0) {
+              return {
+                ok: false,
+                reason: 'Current line value not in assortment',
+                currentValue,
+                target: targetNumber,
+                assortment: assortment.map(Number),
+                availableLineControls: available.slice(0, 80)
+              };
+            }
 
-            if (currentIndex < targetIndex && typeof panel.onLinesInc === 'function') panel.onLinesInc();
-            else if (currentIndex > targetIndex && typeof panel.onLinesDec === 'function') panel.onLinesDec();
-            else return { ok: false, reason: 'Line control method unavailable' };
+            const direction = targetIndex > currentIndex ? 1 : -1;
+            const ranked = [...candidates]
+              .map(candidate => ({ candidate, score: directionScore(candidate, direction) }))
+              .filter(item => item.score > 0)
+              .sort((a, b) => b.score - a.score);
+
+            let changed = false;
+
+            for (const { candidate, score } of ranked) {
+              const before = Number(data.gs.nlines);
+              const text = candidate.name.toLowerCase();
+              const setterLike = /(set.*line|line.*set|change.*line|line.*change)/.test(text);
+
+              try {
+                candidate.invoke(setterLike ? targetNumber : undefined);
+                await delay(70);
+              } catch (error) {
+                attempts.push({
+                  control: candidate.sourceName + '.' + candidate.name + (candidate.method ? '.' + candidate.method : ''),
+                  score,
+                  before,
+                  error: String(error?.message || error).slice(0, 200)
+                });
+                continue;
+              }
+
+              const after = Number(data.gs.nlines);
+              attempts.push({
+                control: candidate.sourceName + '.' + candidate.name + (candidate.method ? '.' + candidate.method : ''),
+                score,
+                before,
+                after
+              });
+
+              if (after !== before) {
+                changed = true;
+                break;
+              }
+            }
+
+            if (!changed) {
+              return {
+                ok: false,
+                reason: 'No discovered line control changed nlines',
+                currentValue,
+                target: targetNumber,
+                assortment: assortment.map(Number),
+                availableLineControls: available.slice(0, 80),
+                attempts
+              };
+            }
           }
 
-          return { ok: false, reason: 'Line configuration guard exhausted' };
+          return {
+            ok: false,
+            reason: 'Line configuration guard exhausted',
+            target: targetNumber,
+            currentValue: Number(data.gs.nlines),
+            attempts,
+            availableLineControls: available.slice(0, 80)
+          };
         } catch (error) {
           return { ok: false, reason: String(error?.message || error) };
         }
