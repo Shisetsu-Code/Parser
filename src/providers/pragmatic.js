@@ -1512,13 +1512,16 @@ export const pragmatic = {
         subtype,
         execution: 'runtime_control',
         available: control?.active !== false,
-        cost: control?.state?.price ?? null,
+        cost: control?.state?.price ?? control?.state?.cost ?? null,
+        multiplier: control?.state?.multiplier ?? null,
+        mode: control?.state?.mode ?? control?.state?.state ?? control?.state?.value ?? null,
         control: {
           kind: control?.kind ?? null,
           name: control?.name ?? null,
           event: control?.event ?? null,
           occurrence: control?.occurrence ?? 0,
-          active: control?.active ?? null
+          active: control?.active ?? null,
+          state: control?.state ?? null
         },
         raw: control
       });
