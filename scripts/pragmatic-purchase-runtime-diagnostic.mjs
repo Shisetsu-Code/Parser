@@ -210,7 +210,7 @@ for (const [name,slug,index] of CASES) {
   const context=await browser.newContext({viewport:{width:1440,height:900}});
   const page=await context.newPage();
   const purInitHandler=attachPurInit(page);
-  const row={name,slug,index,error:null,before:null,options:null,press:null,after:null,afterWait:null};
+  const row={name,slug,index,error:null,before:null,options:null,discoveryReady:null,executionReady:null,press:null,after:null,afterWait:null};
 
   try {
     console.log('CASE '+name);
@@ -220,7 +220,7 @@ for (const [name,slug,index] of CASES) {
     const runtime=await findRuntime(page,30000);
     if (!runtime || runtime.provider.id!=='pragmatic') throw new Error('Pragmatic runtime not found');
 
-    await runtime.provider.waitReady?.(runtime.frame,10000).catch(()=>null);
+    row.discoveryReady=await runtime.provider.waitReady?.(runtime.frame,10000).catch(error=>({ok:false,reason:String(error?.message||error)}));
     row.options=await runtime.provider.listPurchases(runtime.frame);
 
     // Execute from a clean post-discovery session, matching production buy_all.
@@ -229,8 +229,21 @@ for (const [name,slug,index] of CASES) {
     await bootstrapSupportedPage(page);
     const executionRuntime=await findRuntime(page,30000);
     if(!executionRuntime || executionRuntime.provider.id!=='pragmatic') throw new Error('execution runtime not found');
-    const ready=await executionRuntime.provider.waitReady?.(executionRuntime.frame,10000).catch(()=>null);
-    if(!ready?.ok) throw new Error('execution base state not ready');
+    const ready=await executionRuntime.provider.waitReady?.(executionRuntime.frame,10000).catch(error=>({ok:false,reason:String(error?.message||error)}));
+    row.executionReady=ready;
+    if(!ready?.ok) {
+      row.before=await inspect(executionRuntime.frame);
+      throw new Error(
+        'execution base state not ready '+
+        JSON.stringify({
+          purInitReady:ready?.purInitReady,
+          canSpin:ready?.canSpin,
+          safeControls:ready?.safeControls,
+          actions:ready?.actions,
+          reason:ready?.reason
+        })
+      );
+    }
 
     row.before=await inspect(executionRuntime.frame);
     row.press=await executionRuntime.provider.purchase(executionRuntime.frame,index);
@@ -261,6 +274,8 @@ for (const row of results) {
   console.log('=== '+row.name+' ===');
   console.log(JSON.stringify({
     error:row.error,
+    discoveryReady:row.discoveryReady,
+    executionReady:row.executionReady,
     press:row.press,
     before:{
       canSpin:row.before?.canSpin,
