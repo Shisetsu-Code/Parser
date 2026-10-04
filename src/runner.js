@@ -80,6 +80,20 @@ async function runtimeDebug(page) {
   return out;
 }
 
+function classifyRuntimeBlock(debug) {
+  const text = JSON.stringify(debug || []);
+  if (
+    /challenges\.cloudflare\.com/i.test(text) ||
+    /Performing security verification/i.test(text) ||
+    /Checking your Browser/i.test(text) ||
+    /"title":"Just a moment\.\.\."/i.test(text)
+  ) {
+    return 'CI_ACCESS_BLOCK';
+  }
+  return null;
+}
+
+
 export async function discoverCatalog(browser, catalogUrl, options) {
   if (!permittedTopLevel(catalogUrl)) throw new Error(`Catalog host is not allowed by demo-only mode: ${catalogUrl}`);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -280,6 +294,7 @@ async function runOne(browser, url, actions, options, index, total) {
     sweep: [],
     tree: null,
     requests: [],
+    failureClass: null,
     error: null
   };
 
@@ -304,9 +319,22 @@ async function runOne(browser, url, actions, options, index, total) {
     await page.waitForTimeout(options.settleMs);
     await bootstrapSupportedPage(page);
 
-    const runtime = await findRuntime(page, options.timeoutMs);
+    let runtime = await findRuntime(page, Math.min(options.timeoutMs, 3500));
     if (!runtime) {
       result.runtimeDebug = await runtimeDebug(page);
+      result.failureClass = classifyRuntimeBlock(result.runtimeDebug);
+
+      if (result.failureClass === 'CI_ACCESS_BLOCK') {
+        console.log('  runtime-debug=' + JSON.stringify(result.runtimeDebug));
+        throw new Error('CI_ACCESS_BLOCK: provider security verification blocked DEMO runtime');
+      }
+
+      runtime = await findRuntime(page, options.timeoutMs);
+    }
+
+    if (!runtime) {
+      result.runtimeDebug = await runtimeDebug(page);
+      result.failureClass = classifyRuntimeBlock(result.runtimeDebug);
       console.log('  runtime-debug=' + JSON.stringify(result.runtimeDebug));
       throw new Error('No supported runtime found in page/frames');
     }
