@@ -208,6 +208,17 @@ async function waitPragmaticRuntimeReady(provider, frame, page, exchange, maxMs 
       };
     }
 
+    // Protocol can itself provide the next action even while every UI control
+    // remains disabled (e.g. purchased free spins waiting for ConfirmFSStart).
+    if (!animationRunning && featureActive && !needsInput) {
+      return {
+        ok:true,
+        waitedMs:Date.now()-started,
+        snapshot:last,
+        reason:'protocol-actionable'
+      };
+    }
+
     if (
       !animationRunning &&
       !featureActive &&
@@ -478,7 +489,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
     let lastExchange=exchanges.at(-1) || null;
     const seenControls=new Set();
 
-    for (let iteration=0; iteration<8; iteration++) {
+    for (let iteration=0; iteration<48; iteration++) {
       await Promise.allSettled([...responseTasks]);
 
       const runtimeReady=await waitPragmaticRuntimeReady(
@@ -567,78 +578,75 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
         // If the interstitial merely unlocks the next spin, continue below.
       }
 
-      // Protocol-first continuation: Pragmatic may keep the visible Spin
-      // control disabled during free spins/respin sequences even though na=s is
-      // an explicit instruction to request the next spin. Trigger the canonical
-      // spin event directly instead of waiting for a visible button.
-      const protocolSpinActive =
-        lastNa==='s' &&
-        (
-          (lastFsMax!=null && lastFsMax>0 && lastFs!=null && lastFs<lastFsMax) ||
-          String(lastExchange?.rs||'').toLowerCase()==='mc' ||
-          (lastExchange?.trail!=null && /pending|feature/i.test(String(lastExchange.trail)))
-        );
+      // Provider-owned protocol continuation. This covers purchased free-spin
+      // start confirmation, feature spins, collect paths and explicit bonus picks.
+      if (typeof executionRuntime.provider.continueProtocol === 'function' && lastExchange) {
+        const beforeProtocol=responses.length;
+        const continuation=await executionRuntime.provider
+          .continueProtocol(frame,lastExchange)
+          .catch(error=>({ok:false,reason:String(error?.message||error)}));
 
-      if (
-        protocolSpinActive &&
-        snapshot?.runtimeButtons?.stopActive !== true &&
-        (
-          snapshot?.canSpin === true ||
-          snapshot?.runtimeButtons?.spinActive === true
-        )
-      ) {
-        const beforeProtocolSpin=responses.length;
-        const press=await executionRuntime.provider.press(frame,'spin').catch(error=>({
-          ok:false,
-          reason:String(error?.message||error)
-        }));
+        if (continuation?.needsSelection) {
+          const choices=Array.isArray(continuation.choices) ? continuation.choices : [];
 
-        const wait=await waitGameplayQuiet(page,responses,{
-          maxMs:5200,
-          quietMs:1300,
-          minMs:450
-        });
-        await Promise.allSettled([...responseTasks]);
+          if (choices.length) {
+            const choice=choices[0];
+            const press=await executionRuntime.provider
+              .pressProtocolChoice(frame,choice)
+              .catch(error=>({ok:false,reason:String(error?.message||error)}));
 
-        const fresh=responses.slice(beforeProtocolSpin)
-          .map(parsedExchange)
-          .filter(x=>['doSpin','doBonus','doCollect'].includes(x.action));
+            const wait=await waitGameplayQuiet(page,responses,{
+              maxMs:6200,
+              quietMs:1500,
+              minMs:450
+            });
+            await Promise.allSettled([...responseTasks]);
 
-        if (fresh.length) lastExchange=fresh.at(-1);
+            const fresh=responses.slice(beforeProtocol)
+              .map(parsedExchange)
+              .filter(x=>['doSpin','doBonus','doCollect'].includes(x.action));
 
-        result.steps.push({
-          kind:'protocol-spin',
-          iteration,
-          press,
-          responses:fresh,
-          wait
-        });
+            if (fresh.length) lastExchange=fresh.at(-1);
 
-        if (press?.ok && fresh.length) {
-          lastResponseIndex=responses.length;
-          continue;
-        }
-      }
+            result.steps.push({
+              kind:'protocol-pick',
+              iteration,
+              choice,
+              availableChoices:choices,
+              press,
+              responses:fresh,
+              wait
+            });
 
-      // Protocol collect path.
-      if (lastNa==='c') {
-        const beforeCollect=responses.length;
-        const press=await executionRuntime.provider.press(frame,'collect').catch(error=>({
-          ok:false,
-          reason:String(error?.message||error)
-        }));
-        const wait=await waitGameplayQuiet(page,responses,{
-          maxMs:4200,
-          quietMs:1200,
-          minMs:400
-        });
-        await Promise.allSettled([...responseTasks]);
-        const fresh=responses.slice(beforeCollect)
-          .map(parsedExchange)
-          .filter(x=>['doSpin','doBonus','doCollect'].includes(x.action));
-        if (fresh.length) lastExchange=fresh.at(-1);
-        result.steps.push({kind:'protocol-collect',iteration,press,responses:fresh,wait});
-        if (press?.ok && fresh.length) {
+            if (press?.ok) {
+              lastResponseIndex=responses.length;
+              continue;
+            }
+          }
+        } else if (continuation?.ok) {
+          const wait=await waitGameplayQuiet(page,responses,{
+            maxMs:6200,
+            quietMs:1500,
+            minMs:450
+          });
+          await Promise.allSettled([...responseTasks]);
+
+          const fresh=responses.slice(beforeProtocol)
+            .map(parsedExchange)
+            .filter(x=>['doSpin','doBonus','doCollect'].includes(x.action));
+
+          if (fresh.length) lastExchange=fresh.at(-1);
+
+          result.steps.push({
+            kind:continuation.kind || 'protocol',
+            iteration,
+            press:continuation,
+            responses:fresh,
+            wait
+          });
+
+          // ConfirmFSStart can be a local-only transition. Loop again even when it
+          // emitted no request; the next protocol pass can then trigger the spin.
           lastResponseIndex=responses.length;
           continue;
         }
