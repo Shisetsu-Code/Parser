@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { bootstrapSupportedPage, findRuntime } from './providers/index.js';
 import { summarizeRequest, summarizeResponse } from './lib/common.js';
+import { latestPragmaticExchange, classifyPragmaticState } from './protocols/pragmatic.js';
 
 function replayDescriptor(control) {
   return {
@@ -817,6 +818,21 @@ export async function runTreeCrawler(browser, url, expectedProvider, options, sh
         traffic = trafficSignature(delta);
       }
 
+      const normalizedProtocol =
+        expectedProvider === 'pragmatic'
+          ? (() => {
+              const exchange = latestPragmaticExchange(
+                (edgeSession.responses || []).slice(beforeResponses)
+              );
+              return exchange
+                ? {
+                    exchange,
+                    state: classifyPragmaticState(exchange)
+                  }
+                : null;
+            })()
+          : null;
+
       const childSignature = childState.signature ?? null;
       const childControls = childState.controls ?? null;
       const childControlsCount = childControls?.length ?? null;
@@ -833,6 +849,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options, sh
         protocol,
         network: delta,
         responses: responseDelta,
+        normalizedProtocol,
         terminal: !childRuntime,
         toSignature: childSignature,
         childControlsCount,
