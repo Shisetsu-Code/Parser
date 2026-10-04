@@ -94,7 +94,7 @@ function scoreContinuation(control, exchange) {
   if (control?.active === false) return -10000;
   const text=controlText(control);
 
-  if (/(purchase|buy|rebuy|autoplay|bet|stake|sound|music|settings|rules|history|home|fullscreen|close|cancel)/i.test(text)) {
+  if (/(purchase|buy|rebuy|autoplay|bet|stake|sound|music|settings|rules|history|home|fullscreen|close|cancel|stop.?spin|pressed.?stop)/i.test(text)) {
     return -1000;
   }
 
@@ -105,7 +105,8 @@ function scoreContinuation(control, exchange) {
   } else {
     if (/(continue|collect|start|ok)/i.test(text)) score+=500;
     if (/(free.?spin|respin)/i.test(text)) score+=450;
-    if (/(spin|play)/i.test(text)) score+=120;
+    if (/(startspin|start.?spin|pressed.?spin|^.*\bspin\b.*$)/i.test(text)) score+=320;
+    else if (/(spin|play)/i.test(text)) score+=120;
   }
 
   if (/xtbutton/i.test(text)) score+=30;
