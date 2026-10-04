@@ -256,10 +256,30 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
       );
     }
 
+    // listPurchases() is allowed to open lazy Buy Feature UI in order to discover
+    // options. Production executes each purchase in a clean context. Recreate that
+    // contract here so discovery state cannot poison execution state.
+    serverPurInit=null;
+    await page.goto(urlFor(slug),{waitUntil:'domcontentloaded',timeout:30000});
+    await page.waitForTimeout(2200);
+    await bootstrapSupportedPage(page);
+
+    const executionRuntime=await findRuntime(page,30000);
+    if(!executionRuntime || executionRuntime.provider.id!=='pragmatic') {
+      throw new Error('Pragmatic runtime not found for clean purchase execution');
+    }
+
+    frame=executionRuntime.frame;
+    await executionRuntime.provider.waitReady?.(frame,10000).then(ready=>{
+      if(!ready?.ok) {
+        throw new Error('clean Pragmatic base state not ready: '+(ready?.reason||'unknown'));
+      }
+    });
+
     const requestBase=requests.length;
     const responseBase=responses.length;
 
-    result.purchasePress=await provider.purchase(frame,purchaseIndex);
+    result.purchasePress=await executionRuntime.provider.purchase(frame,purchaseIndex);
     await page.waitForTimeout(500);
 
     let newRequests=requests.slice(requestBase);
@@ -269,7 +289,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
     });
 
     if (result.purchasePress?.ok && result.purchasePress?.needsSpin && !hasPurchaseSpin) {
-      const spin=await provider.press(frame,'spin');
+      const spin=await executionRuntime.provider.press(frame,'spin');
       result.steps.push({kind:'purchase-spin-fallback',press:spin});
     }
 
@@ -307,7 +327,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
     for (let iteration=0; iteration<8; iteration++) {
       await Promise.allSettled([...responseTasks]);
 
-      const snapshot=await snapshotState(provider,frame);
+      const snapshot=await snapshotState(executionRuntime.provider,frame);
 
       if (terminalCandidate(lastExchange,snapshot)) {
         // Give automatic feature activity one final chance before declaring terminal.
@@ -356,7 +376,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
         continue;
       }
 
-      let controls=await provider.listControls(frame).catch(()=>[]);
+      let controls=await executionRuntime.provider.listControls(frame).catch(()=>[]);
       controls=controls
         .map(control=>({control,score:scoreContinuation(control,lastExchange)}))
         .filter(item=>item.score>0)
@@ -391,7 +411,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
       seenControls.add(choice.key);
 
       const beforeActionResponses=responses.length;
-      const press=await provider.pressControl(frame,choice.control).catch(error=>({
+      const press=await executionRuntime.provider.pressControl(frame,choice.control).catch(error=>({
         ok:false,
         reason:String(error?.message||error)
       }));
@@ -428,7 +448,7 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
         detected:false,
         reason:'iteration limit reached',
         exchange:lastExchange,
-        snapshot:await snapshotState(provider,frame)
+        snapshot:await snapshotState(executionRuntime.provider,frame)
       };
     }
 
