@@ -12,6 +12,8 @@ function replayDescriptor(control) {
     optionIndex: control?.optionIndex ?? null,
     type: control?.type ?? null,
     method: control?.method ?? null,
+    configKey: control?.configKey ?? null,
+    configValue: control?.configValue ?? null,
     active: control?.active ?? null
   };
 }
@@ -58,11 +60,14 @@ function controlPriority(control) {
     control?.purchaseIndex,
     control?.optionIndex,
     control?.type,
-    control?.method
+    control?.method,
+    control?.configKey,
+    control?.configValue
   ].filter(v => v != null).join(' ').toLowerCase();
 
   let score = 0;
   if (control?.active === true) score += 100;
+  if (/belatra_config|config_lines/i.test(text)) score += 700;
   if (/purchasefeature/i.test(text)) score += 650;
   if (/(purchase|buy|feature|confirm|rebuy|o_\d|button\d)/i.test(text)) score += 300;
   if (/(intro|continue|start|close|ok)/i.test(text)) score += 160;
@@ -179,7 +184,9 @@ function semanticControlKey(control) {
     control?.purchaseIndex ?? '',
     control?.optionIndex ?? '',
     control?.type ?? '',
-    control?.method ?? ''
+    control?.method ?? '',
+    control?.configKey ?? '',
+    control?.configValue ?? ''
   ].map(String).join('|');
 }
 
@@ -203,7 +210,9 @@ function controlIdentity(control) {
     control?.purchaseIndex ?? '',
     control?.optionIndex ?? '',
     control?.type ?? '',
-    control?.method ?? ''
+    control?.method ?? '',
+    control?.configKey ?? '',
+    control?.configValue ?? ''
   ].map(String).join('|');
 }
 
@@ -222,6 +231,26 @@ async function readStateSnapshot(provider, frame) {
     return snapshot && typeof snapshot === 'object' ? snapshot : null;
   } catch {
     return null;
+  }
+}
+
+async function readProtocolCursor(provider, frame) {
+  if (typeof provider?.protocolCursor !== 'function') return null;
+  try {
+    const value = await provider.protocolCursor(frame);
+    return Number.isFinite(Number(value)) ? Number(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readProtocolEvents(provider, frame, since = null) {
+  if (since == null || typeof provider?.protocolEvents !== 'function') return [];
+  try {
+    const events = await provider.protocolEvents(frame, since);
+    return Array.isArray(events) ? events : [];
+  } catch {
+    return [];
   }
 }
 
@@ -297,7 +326,7 @@ async function captureRuntimeState(runtime) {
   };
 }
 
-async function settleAutomaticActivity(page, network, expectedProvider, options, initialState = null) {
+async function settleAutomaticActivity(page, network, expectedProvider, options, initialState = null, initialProtocolCursor = null) {
   const maxWaitMs = Math.max(500, Number(options.treeAutoWaitMs) || 8000);
   const quietMs = Math.max(300, Number(options.treeQuietMs) || 900);
   const pollMs = Math.min(350, Math.max(120, Math.floor(quietMs / 4)));
@@ -305,6 +334,7 @@ async function settleAutomaticActivity(page, network, expectedProvider, options,
   const started = Date.now();
   let lastActivityAt = Date.now();
   let lastActionRequestCount = trafficSignature(network).actionRequestCount;
+  let lastProtocolCursor = initialProtocolCursor;
   let current = initialState;
   let lastSignature = current?.signature ?? null;
   const transitions = [];
@@ -327,19 +357,27 @@ async function settleAutomaticActivity(page, network, expectedProvider, options,
 
     const next = await captureRuntimeState(runtime);
     const actionRequestCount = trafficSignature(network).actionRequestCount;
+    const protocolCursor = await readProtocolCursor(runtime.provider, runtime.frame);
     const networkChanged = actionRequestCount !== lastActionRequestCount;
+    const protocolChanged =
+      protocolCursor != null &&
+      lastProtocolCursor != null &&
+      protocolCursor !== lastProtocolCursor;
     const stateChanged = next.signature !== lastSignature;
 
-    if (networkChanged || stateChanged) {
+    if (networkChanged || protocolChanged || stateChanged) {
       transitions.push({
         atMs: Date.now() - started,
         actionRequestCount,
         signature: next.signature,
         networkChanged,
+        protocolChanged,
+        protocolCursor,
         stateChanged
       });
       lastActivityAt = Date.now();
       lastActionRequestCount = actionRequestCount;
+      if (protocolCursor != null) lastProtocolCursor = protocolCursor;
       lastSignature = next.signature;
       current = next;
     } else if (!current) {
@@ -395,6 +433,7 @@ async function openAtPath(browser, url, expectedProvider, path, options) {
       const step = path[i];
       await waitForControl(runtime.provider, runtime.frame, page, step, Math.min(options.timeoutMs, 3500));
       const before = network.length;
+      const protocolBefore = await readProtocolCursor(runtime.provider, runtime.frame);
       let press;
       try {
         press = await runtime.provider.pressControl(runtime.frame, step);
@@ -404,11 +443,13 @@ async function openAtPath(browser, url, expectedProvider, path, options) {
 
       await page.waitForTimeout(actionDelay(options));
       const delta = network.slice(before);
+      const protocol = await readProtocolEvents(runtime.provider, runtime.frame, protocolBefore);
       replay.push({
         index: i,
         control: step,
         press,
-        traffic: trafficSignature(delta)
+        traffic: trafficSignature(delta),
+        protocol
       });
 
       if (!press?.ok) {
@@ -552,6 +593,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
       }
 
       const before = edgeSession.network.length;
+      const protocolBefore = await readProtocolCursor(edgeSession.provider, edgeSession.frame);
       const started = Date.now();
       let press;
 
@@ -571,12 +613,18 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
       let childState = await captureRuntimeState(childRuntime);
       let delta = edgeSession.network.slice(before);
       let traffic = trafficSignature(delta);
+      let protocol = await readProtocolEvents(
+        childRuntime?.provider ?? edgeSession.provider,
+        childRuntime?.frame ?? edgeSession.frame,
+        protocolBefore
+      );
 
       const initialStateChanged = Boolean(childState.signature && childState.signature !== signature);
       const shouldObserveAutomatic =
         press?.ok &&
         (
           traffic.actionRequestCount > 0 ||
+          protocol.length > 0 ||
           initialStateChanged ||
           isFeatureishControl(control) ||
           pathHasFeatureish(queued.path)
@@ -589,12 +637,18 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
           edgeSession.network,
           expectedProvider,
           options,
-          childState
+          childState,
+          protocolBefore
         );
         childState = automatic;
         childRuntime = automatic.runtime;
         delta = edgeSession.network.slice(before);
         traffic = trafficSignature(delta);
+        protocol = await readProtocolEvents(
+          childRuntime?.provider ?? edgeSession.provider,
+          childRuntime?.frame ?? edgeSession.frame,
+          protocolBefore
+        );
       }
 
       const continuations = [];
@@ -703,6 +757,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
         press,
         elapsedMs: Date.now() - started,
         traffic,
+        protocol,
         network: delta,
         terminal: !childRuntime,
         toSignature: childSignature,
@@ -718,7 +773,12 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
 
       tree.edges.push(edge);
 
-      if (traffic.requestCount > 0 || traffic.signals.length > 0) {
+      if (
+        traffic.actionRequestCount > 0 ||
+        traffic.signals.length > 0 ||
+        protocol.length > 0 ||
+        childSignature !== signature
+      ) {
         tree.interestingEdges.push(edge.id);
       }
 
@@ -730,6 +790,7 @@ export async function runTreeCrawler(browser, url, expectedProvider, options) {
         ' ok=' + Boolean(press?.ok) +
         ' pending=' + (press?.pendingPurchaseIndex ?? childSnapshot?.featurePurchaseIndex ?? '-') +
         ' req=' + traffic.requestCount +
+        ' protocol=' + protocol.length +
         ' signals=' + (traffic.signals.join(',') || '-') +
         ' child=' + (childSignature || 'terminal')
       );
