@@ -1,8 +1,9 @@
 import { threeOaks } from './threeoaks.js';
 import { pragmatic } from './pragmatic.js';
+import { belatra } from './belatra.js';
 import { genericCanvas } from './generic-canvas.js';
 
-export const providers = [threeOaks, pragmatic, genericCanvas];
+export const providers = [threeOaks, pragmatic, belatra, genericCanvas];
 
 export async function bootstrapSupportedPage(page) {
   for (const provider of providers) {
