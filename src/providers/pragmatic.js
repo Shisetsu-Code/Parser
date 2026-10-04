@@ -615,14 +615,15 @@ export const pragmatic = {
             seen.set(key, occurrence + 1);
             const economicText = (String(name || '') + ' ' + String(event || '')).toLowerCase();
             const economicKind =
-              /(buy|purchase|ante|booster|chance|feature.?bet|extra.?bet)/i.test(economicText)
+              /(buy|purchase|ante|booster|chance|double.?chance|feature.?bet|extra.?bet|super.?spin|enhanced.?spin)/i.test(economicText)
                 ? 'purchase'
                 : null;
             const purchaseSubtype =
-              /ante/i.test(economicText) ? 'ante' :
+              /ante/i.test(economicText) ? 'ante_bet' :
               /booster/i.test(economicText) ? 'booster' :
-              /chance|feature.?bet|extra.?bet/i.test(economicText) ? 'chance' :
-              /(buy|purchase)/i.test(economicText) ? 'bonus' :
+              /super.?spin|enhanced.?spin/i.test(economicText) ? 'super_spin' :
+              /chance|double.?chance|feature.?bet|extra.?bet/i.test(economicText) ? 'chance' :
+              /(buy|purchase)/i.test(economicText) ? 'buy_feature' :
               null;
 
             controls.push({
@@ -1444,6 +1445,63 @@ export const pragmatic = {
     }
 
     return last.options;
+  },
+
+  async listEconomicPurchases(frame) {
+    const direct = await this.listPurchases(frame).catch(() => []);
+    const controls = await this.listControls(frame).catch(() => []);
+    const out = [];
+
+    for (const option of direct) {
+      out.push({
+        id: 'buy_feature:' + String(option.index),
+        economicKind: 'purchase',
+        subtype: 'buy_feature',
+        execution: 'feature_purchase_index',
+        index: option.index,
+        ordinal: option.ordinal,
+        available: option.available !== false,
+        cost: option.cost ?? null,
+        source: option.kind ?? 'FeaturePurchase',
+        raw: option
+      });
+    }
+
+    const seen = new Set();
+    for (const control of controls) {
+      if (control?.economicKind !== 'purchase') continue;
+      const subtype = String(control?.purchaseSubtype || '');
+      if (!subtype || subtype === 'bonus' || subtype === 'buy_feature') continue;
+
+      const key = [
+        subtype,
+        control?.kind ?? '',
+        control?.name ?? '',
+        control?.event ?? '',
+        control?.occurrence ?? 0
+      ].join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      out.push({
+        id: 'runtime:' + key,
+        economicKind: 'purchase',
+        subtype,
+        execution: 'runtime_control',
+        available: control?.active !== false,
+        cost: control?.state?.price ?? null,
+        control: {
+          kind: control?.kind ?? null,
+          name: control?.name ?? null,
+          event: control?.event ?? null,
+          occurrence: control?.occurrence ?? 0,
+          active: control?.active ?? null
+        },
+        raw: control
+      });
+    }
+
+    return out;
   },
 
   async purchase(frame, index) {
