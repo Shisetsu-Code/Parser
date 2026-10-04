@@ -469,6 +469,7 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
     scan: null,
     actions: [],
     purchaseOptions: [],
+    economicPurchases: [],
     purchases: [],
     sweep: [],
     tree: null,
@@ -545,6 +546,18 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
     result.scan = await provider.scan(frame);
     console.log(`  provider=${provider.id} frame=${frame.url()}`);
     console.log(`  controls=${result.scan?.controls?.length ?? 0}`);
+
+    if (typeof provider.listEconomicPurchases === 'function') {
+      result.economicPurchases = await provider.listEconomicPurchases(frame).catch(() => []);
+      console.log(
+        '  economic-purchases=' + result.economicPurchases.length +
+        ' [' +
+        result.economicPurchases
+          .map(item => String(item?.subtype || 'unknown'))
+          .join(',') +
+        ']'
+      );
+    }
 
     const treeAll = actions.some(isTreeAction);
     if (treeAll) {
