@@ -4,6 +4,7 @@ import { bootstrapSupportedPage, findRuntime } from '../src/providers/index.js';
 import { summarizeResponse, writeJson } from '../src/lib/common.js';
 
 const GAMES = [
+  ['Fortune of Olympus','fortune-of-olympus'],
   ['Great Rhino Megaways','great-rhino-megaways'],
   ['Wild Beach Party','wild-beach-party'],
   ['Wild Depths','wild-depths'],
@@ -209,7 +210,7 @@ for(let gi=0;gi<GAMES.length;gi++){
   results.push(result);
 
   console.log(
-    '['+(gi+1)+'/20] '+name+
+    '['+(gi+1)+'/'+GAMES.length+'] '+name+
     ' total='+inventory.length+
     ' '+Object.entries(bySubtype).map(([k,v])=>k+':'+v).join(' ') +
     (error?' error='+error:'')
