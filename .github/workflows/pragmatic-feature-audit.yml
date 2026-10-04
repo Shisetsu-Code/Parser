@@ -1,0 +1,40 @@
+name: Pragmatic feature execution audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/pragmatic-feature-audit.mjs"
+      - ".github/workflows/pragmatic-feature-audit.yml"
+      - "src/providers/pragmatic.js"
+      - "src/lib/common.js"
+      - "src/runner.js"
+      - "src/tree-crawler.js"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Run Pragmatic feature audit
+        run: npm run pragmatic:feature-audit
+      - name: Print feature audit summary
+        if: always()
+        run: |
+          if [ -f results/pragmatic-feature-audit.json ]; then
+            node -e "const x=require('./results/pragmatic-feature-audit.json'); for(const r of x.results){console.log([r.game,'purchase='+r.purchaseIndex,'status='+r.status,'entry='+(r.entry?.action||'-')+'/pur:'+(r.entry?.pur ?? r.entry?.rawRequest?.puri ?? '-'),'steps='+r.steps.length,'terminal='+(r.terminal?.detected===true),'err='+(r.error?String(r.error).split('\n')[0]:'-')].join(' | '))}; console.log('SUMMARY',x.purchases,x.pass,x.blocked,x.errors)"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pragmatic-feature-audit
+          path: results/pragmatic-feature-audit.json
+          if-no-files-found: warn
+          retention-days: 7
