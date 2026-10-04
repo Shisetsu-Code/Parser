@@ -197,7 +197,7 @@ export const pragmatic = {
 
   async listPurchases(frame) {
     const collect = async () => frame.evaluate(() => {
-      if (!window.globalRuntime) return { options: [], pending: false, hasPurchaseRuntime: false };
+      if (!window.globalRuntime) return { options: [], pending: false, hasPurchaseRuntime: false, server: globalThis.__parserPragmaticPurInit ?? null };
       const roots = globalRuntime.sceneRoots || [];
       const out = new Map();
       let pending = false;
@@ -301,7 +301,8 @@ export const pragmatic = {
       return {
         options: [...out.values()].sort((a, b) => a.index - b.index),
         pending,
-        hasPurchaseRuntime
+        hasPurchaseRuntime,
+        server: globalThis.__parserPragmaticPurInit ?? null
       };
     });
 
@@ -349,15 +350,30 @@ export const pragmatic = {
       return false;
     }).catch(() => false);
 
-    let last = { options: [], pending: false, hasPurchaseRuntime: false };
+    let last = { options: [], pending: false, hasPurchaseRuntime: false, server: null };
     let opened = false;
 
     // Some games instantiate FeaturePurchaseV2 only after the buy-feature interface
-    // is opened. Others populate purchaseOptions asynchronously. Probe both cases
-    // in a bounded window; do not count transient controls such as Rebuy (-1).
+    // is opened. Others populate purchaseOptions asynchronously. Server doInit.purInit
+    // is authoritative for the number of purchases enabled in this exact DEMO session.
     for (let attempt = 0; attempt < 12; attempt++) {
       last = await collect();
-      if (last.options.length) return last.options;
+
+      const serverCount = Number(last.server?.count);
+      if (Number.isFinite(serverCount)) {
+        if (serverCount <= 0) return [];
+
+        if (last.options.length >= serverCount) {
+          return last.options.slice(0, serverCount).map((option, index) => ({
+            ...option,
+            index,
+            ordinal: index + 1,
+            serverDeclared: true
+          }));
+        }
+      } else if (last.options.length) {
+        return last.options;
+      }
 
       if (!opened && attempt >= 1) {
         opened = await openPurchaseMenu();
@@ -368,6 +384,36 @@ export const pragmatic = {
       }
 
       await frame.page().waitForTimeout(last.pending || last.hasPurchaseRuntime ? 200 : 150);
+    }
+
+    const serverCount = Number(last.server?.count);
+    if (Number.isFinite(serverCount) && serverCount > 0) {
+      const serverOptions = Array.isArray(last.server?.options) ? last.server.options : [];
+      const resolved = new Map(last.options.map(option => [Number(option.index), option]));
+
+      for (let index = 0; index < serverCount; index++) {
+        if (resolved.has(index)) continue;
+        const serverOption = serverOptions[index] || null;
+        resolved.set(index, {
+          index,
+          ordinal: index + 1,
+          available: true,
+          reportedAvailable: null,
+          forceDisabled: null,
+          active: null,
+          cost:
+            serverOption?.bet ??
+            serverOption?.cost ??
+            serverOption?.price ??
+            null,
+          kind: 'ServerPurInit',
+          serverDeclared: true
+        });
+      }
+
+      return [...resolved.values()]
+        .sort((a, b) => a.index - b.index)
+        .slice(0, serverCount);
     }
 
     return last.options;
