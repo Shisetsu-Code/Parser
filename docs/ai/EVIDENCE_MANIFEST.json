@@ -155,6 +155,103 @@
         "RESPIN_BUY",
         "BONUS_BUY"
       ]
+    },
+    {
+      "provider": "Belatra",
+      "file": "belatragames.com_Archive [26-10-03 23-08-58](1).har",
+      "game": "4 Secrets of Aladdin",
+      "family": "aladdin",
+      "observed": [
+        "single Buy Bonus banner with explicit confirmation",
+        "purchase-banner bet adjustment",
+        "savePlayerChoice",
+        "Gems picker with name/att/info selector"
+      ]
+    },
+    {
+      "provider": "Belatra",
+      "file": "free-slot.belatragames.com_Archive [26-10-03 23-15-25].har",
+      "game": "Irish Thunder",
+      "family": "irish",
+      "observed": [
+        "BannerBuyBonusMultiple",
+        "3 purchase options",
+        "justBuyBonusSelectType",
+        "separate START confirmation",
+        "purchase-banner bet adjustment",
+        "savePlayerChoice fast-finish path"
+      ]
+    },
+    {
+      "provider": "Belatra",
+      "file": "free-slot.belatragames.com_Archive [26-10-03 23-16-17].har",
+      "game": "Halloween Crystals",
+      "family": "digger",
+      "observed": [
+        "BannerBuyBonusMultiple",
+        "3 purchase options",
+        "separate START confirmation",
+        "purchase-banner bet adjustment",
+        "PRESS TO CONTINUE support"
+      ]
+    },
+    {
+      "provider": "Belatra",
+      "file": "free-slot.belatragames.com_Archive [26-10-03 23-17-20].har",
+      "game": "X-Mas Gifts",
+      "family": "digger_xmas",
+      "observed": [
+        "BannerBuyBonusMultiple",
+        "3 purchase options",
+        "separate START confirmation",
+        "purchase-banner bet adjustment",
+        "PRESS TO CONTINUE support"
+      ]
+    },
+    {
+      "provider": "Belatra",
+      "file": "free-slot.belatragames.com_Archive [26-10-03 23-19-36].har",
+      "game": "Legacy of Doom",
+      "family": "book_legacy",
+      "observed": [
+        "useBetDependOnLines=true",
+        "nlines structural configuration",
+        "linesAssortment",
+        "betPerLine and betPerGame",
+        "calcBetPerGameByFormula",
+        "payout/feature formula depends on nlines * betPerLine",
+        "single Buy Bonus with explicit confirmation"
+      ]
+    },
+    {
+      "provider": "Belatra",
+      "file": "belatragames.com_Archive [26-10-03 23-04-41](1).har",
+      "game": "Lazy Monkey",
+      "family": "lazy_monkey",
+      "observed": [
+        "savePlayerChoice Bonus2 with att/info",
+        "5 rope choices",
+        "repeated selection attempts",
+        "savePlayerChoice Bonus3",
+        "2 bag choices"
+      ]
+    },
+    {
+      "provider": "Belatra",
+      "file": "belatragames.com_Archive [26-10-03 23-07-55](1).har",
+      "game": "Jackpot Pagoda",
+      "family": "jackpot_pagoda",
+      "observed": [
+        "Hold & Win buy mode",
+        "justBuyBonusSelectType_AUTOBUY",
+        "multi-level bonus",
+        "PRESS TO CONTINUE",
+        "automatic and manual continuation coexist"
+      ]
     }
+  ],
+  "notes": [
+    "Belatra common core exposes plaintext ajaxQueue.post action objects before opaque POST /game serialization.",
+    "Current Belatra adapter validates all_content modules 2731(data), 9337(unitmng), 1129(ajaxQueue); numeric IDs are version-specific ABI observations."
   ]
 }
