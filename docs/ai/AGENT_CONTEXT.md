@@ -48,13 +48,14 @@ Unknown actions are valid evidence.
 | Pragmatic Play | specific, mature | advanced | HAR + runtime + live DEMO |
 | 3Oaks | specific, mature | partial/advanced | runtime + live DEMO |
 | BGaming | generic-canvas operational; provider-specific protocol pending | advanced from HAR | 9 HAR samples + live DEMO |
-| Belatra | generic bootstrap evidence; CI blocked by Cloudflare | intermediate from HAR | local HAR + bundle evidence |
+| Belatra | provider-specific runtime adapter; CI blocked by Cloudflare | advanced sampled runtime/protocol mapping | 8+ local HAR samples + bundle evidence |
 
 ## Current implementation components
 
 - src/tree-crawler.js: provider-agnostic replay/state tree
 - src/providers/pragmatic.js: Pragmatic runtime/control adapter
 - src/providers/threeoaks.js: 3Oaks runtime/control adapter
+- src/providers/belatra.js: Belatra runtime/configuration adapter + plaintext protocol hook
 - src/providers/generic-canvas.js: fallback DOM/canvas adapter
 - src/providers/index.js: provider detection
 
@@ -208,6 +209,20 @@ UNKNOWN:
 not supported by current evidence.
 
 Agents must preserve these distinctions.
+
+## Structural configuration rule
+
+Provider-specific finite settings that change purchase/feature semantics are part of the state tree.
+
+Canonical example: Belatra Legacy of Doom `nlines`.
+
+The crawler/provider adapter must:
+- expose exact configuration actions;
+- include configuration in state snapshot;
+- branch each supported structural value;
+- traverse purchase/features from each configuration state.
+
+Purchase selection and purchase confirmation are separate transitions when the provider runtime exposes both.
 
 ## Provider files
 
