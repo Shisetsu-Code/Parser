@@ -164,8 +164,8 @@ function terminalCandidate(exchange, snapshot) {
 }
 
 async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex) {
-  const context=await browser.newContext({viewport:{width:1440,height:900}});
-  const page=await context.newPage();
+  let context=await browser.newContext({viewport:{width:1440,height:900}});
+  let page=await context.newPage();
   const requests=[];
   const responses=[];
   const responseTasks=new Set();
@@ -261,10 +261,23 @@ async function runPurchase(browser, gameName, slug, expectedCount, purchaseIndex
       );
     }
 
-    // listPurchases() is allowed to open lazy Buy Feature UI in order to discover
-    // options. Production executes each purchase in a clean context. Recreate that
-    // contract here so discovery state cannot poison execution state.
+    // listPurchases() is allowed to open lazy Buy Feature UI. A page reload in
+    // the same BrowserContext can keep provider/session state, so it is NOT a clean
+    // purchase execution session. Production creates a fresh context per purchase.
+    await Promise.allSettled([...responseTasks]);
+    page.off('request',onRequest);
+    page.off('response',onResponse);
+    await context.close();
+
+    requests.length=0;
+    responses.length=0;
     serverPurInit=null;
+
+    context=await browser.newContext({viewport:{width:1440,height:900}});
+    page=await context.newPage();
+    page.on('request',onRequest);
+    page.on('response',onResponse);
+
     await page.goto(urlFor(slug),{waitUntil:'domcontentloaded',timeout:30000});
     await page.waitForTimeout(2200);
     await bootstrapSupportedPage(page);
