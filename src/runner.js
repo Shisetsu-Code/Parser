@@ -191,7 +191,10 @@ function trafficSignature(requests) {
     }
 
     if (/doSpin|action.?[=:].?doSpin|command.?[=:].?(play|spin)/i.test(hay)) signals.add('spin');
-    if (/purchased_feature|\bpur(?:chased)?[=:]/i.test(hay)) signals.add('purchase');
+    if (
+      /purchased_feature|\bpur(?:chased)?[=:]/i.test(hay) ||
+      /(?:ante(?:_?bet)?|bonus_?chance|double_?chance|feature_?bet|extra_?bet|booster|super_?spin|enhanced_?spin)[=:"'&?]/i.test(hay)
+    ) signals.add('purchase');
     if (/doBonus|bonus/i.test(hay)) signals.add('bonus');
     if (/bet/i.test(hay)) signals.add('bet');
   }
