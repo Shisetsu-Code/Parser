@@ -119,6 +119,8 @@ export async function discoverCatalog(browser, catalogUrl, options) {
 export async function run(options, initialTargets) {
   const browser = await chromium.launch({ headless: options.headless });
   const results = [];
+  let sharedContext = null;
+  let sharedPage = null;
   try {
     let targets = [...initialTargets];
     for (const catalog of options.catalog) {
@@ -135,13 +137,29 @@ export async function run(options, initialTargets) {
     }
     targets = options.maxGames > 0 ? deduped.slice(0, options.maxGames) : deduped;
 
+    if (options.reuseContext) {
+      sharedContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      sharedPage = await sharedContext.newPage();
+      console.log('Reusing one browser context/page across targets.');
+    }
+
     for (let index = 0; index < targets.length; index++) {
       const target = targets[index];
       const actions = target.actions.length ? target.actions : options.defaultActions;
-      const result = await runOne(browser, target.url, actions, options, index + 1, targets.length);
+      const sharedSession = sharedContext ? { context: sharedContext, page: sharedPage } : null;
+      const result = await runOne(
+        browser,
+        target.url,
+        actions,
+        options,
+        index + 1,
+        targets.length,
+        sharedSession
+      );
       results.push(result);
     }
   } finally {
+    if (sharedContext) await sharedContext.close().catch(() => {});
     await browser.close();
   }
   return results;
@@ -206,15 +224,17 @@ async function pauseForInspection(message) {
 }
 
 async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, options) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = await context.newPage();
+  const ownsContext = !sharedSession;
+  const context = sharedSession?.context ?? await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = sharedSession?.page ?? await context.newPage();
   const network = [];
-  page.on('request', req => {
+  const onRequest = req => {
     const u = req.url();
     if (/gameService|doSpin|doBonus|gs2c|spin|bonus|feature|purchase/i.test(u) || req.method() !== 'GET') {
       network.push(summarizeRequest(req));
     }
-  });
+  };
+  page.on('request', onRequest);
 
   const result = {
     option: purchaseOption,
@@ -233,7 +253,8 @@ async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, 
 
     const runtime = await findRuntime(page, options.timeoutMs);
     if (!runtime) throw new Error('No supported runtime found for purchase');
-    const { provider, frame } = runtime;
+    const provider = runtime.provider;
+    let frame = runtime.frame;
     result.provider = provider.id;
     if (provider.id !== expectedProvider) throw new Error('Provider changed during purchase reload');
 
@@ -278,7 +299,7 @@ async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, 
   return result;
 }
 
-async function runOne(browser, url, actions, options, index, total) {
+async function runOne(browser, url, actions, options, index, total, sharedSession = null) {
   const result = {
     url,
     index,
@@ -326,7 +347,16 @@ async function runOne(browser, url, actions, options, index, total) {
 
       if (result.failureClass === 'CI_ACCESS_BLOCK') {
         console.log('  runtime-debug=' + JSON.stringify(result.runtimeDebug));
-        throw new Error('CI_ACCESS_BLOCK: provider security verification blocked DEMO runtime');
+
+        if (process.env.CI || options.headless) {
+          throw new Error('CI_ACCESS_BLOCK: provider security verification blocked DEMO runtime');
+        }
+
+        // Local headed mode: allow the user to complete Cloudflare/Turnstile
+        // in the visible browser. Keep the same context so the clearance cookie
+        // survives all subsequent tree replays and targets.
+        console.log('  security challenge detected; complete it in the browser. Waiting for runtime...');
+        result.failureClass = null;
       }
 
       runtime = await findRuntime(page, options.timeoutMs);
@@ -362,7 +392,19 @@ async function runOne(browser, url, actions, options, index, total) {
         `edges=${options.treeMaxEdges} controls/state=${options.treeMaxControls}`
       );
 
-      result.tree = await runTreeCrawler(browser, url, provider.id, options);
+      const treeSharedSession =
+        provider.id === 'belatra' || options.reuseContext
+          ? { context, page }
+          : null;
+
+      result.tree = await runTreeCrawler(browser, url, provider.id, options, treeSharedSession);
+
+      // Tree replay may navigate the shared page. Reacquire the current frame
+      // before any subsequent action family uses it.
+      if (treeSharedSession) {
+        const current = await findRuntime(page, Math.min(options.timeoutMs, 5000)).catch(() => null);
+        if (current?.provider?.id === provider.id) frame = current.frame;
+      }
 
       console.log(
         `  tree done states=${result.tree.stats.states} edges=${result.tree.stats.edges} ` +
@@ -507,7 +549,8 @@ async function runOne(browser, url, actions, options, index, total) {
     result.finishedAt = new Date().toISOString();
     const file = path.join('results', `${String(index).padStart(4, '0')}-${safeName(url)}.json`);
     await writeJson(file, result);
-    await context.close();
+    try { page.off('request', onRequest); } catch {}
+    if (ownsContext) await context.close();
   }
   return result;
 }
