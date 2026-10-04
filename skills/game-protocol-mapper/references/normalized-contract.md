@@ -29,7 +29,7 @@ type NormalizedProviderState = {
 
 type NormalizedAction = {
   name: string;
-  kind: "configure" | "spin" | "respin" | "freespin" | "purchase-select" | "purchase-confirm" | "bonus" | "pick" | "confirm" | "collect" | "continue" | "unknown";
+  kind: "configure" | "spin" | "respin" | "freespin" | "purchase-select" | "purchase-toggle" | "purchase-confirm" | "bonus" | "pick" | "confirm" | "collect" | "continue" | "unknown";
   selector?: Record<string, unknown>;
   raw?: unknown;
 };
@@ -123,3 +123,34 @@ protocolEvents(frame, since: number): Promise<unknown[]>
 ```
 
 Tree edges should retain these events separately from raw network requests.
+
+
+## Purchase definition
+
+A PURCHASE is any user-selectable action that adds cost beyond a normal/base spin.
+
+This includes, when separately priced:
+- Buy Feature / Bonus Buy
+- Free Spins Buy
+- Ante Bet / Bonus Chance / Double Chance
+- Super Spin / Enhanced Spin
+- Booster / feature multiplier
+- extra ball / extra draw
+- any other paid modifier layered on top of the base spin
+
+The resulting feature is separate metadata, not a different top-level action category.
+
+Example:
+```json
+{
+  "kind": "purchase-select",
+  "purchase": {
+    "subtype": "ante_bet",
+    "costModel": "extra_per_spin",
+    "resultingFeature": "increased_feature_chance"
+  }
+}
+```
+
+Do not classify a paid Ante Bet as configuration merely because it changes spin behavior.
+A free structural setting such as paylines/line-count remains configuration.
