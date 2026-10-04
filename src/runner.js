@@ -210,6 +210,61 @@ function hasGameplayRequest(requests) {
   });
 }
 
+function parsePragmaticPurInit(text) {
+  if (!text) return null;
+
+  const params = new URLSearchParams(text);
+  const raw = params.get('purInit');
+  const enabledRaw = params.get('purInit_e');
+  const enabled = enabledRaw == null ? null : Number(enabledRaw);
+
+  if (raw == null) {
+    return { count: 0, enabled, options: [] };
+  }
+
+  let decoded = raw;
+  try { decoded = decodeURIComponent(raw); } catch {}
+
+  let parsed = null;
+  try { parsed = JSON.parse(decoded); } catch {}
+
+  let options = [];
+  if (Array.isArray(parsed)) options = parsed;
+  else if (parsed && Array.isArray(parsed.options)) options = parsed.options;
+  else {
+    const matches = decoded.match(/\{[^{}]*\}/g) || [];
+    options = matches.map((value, index) => ({ index, raw: value }));
+  }
+
+  return {
+    count: options.length,
+    enabled,
+    options
+  };
+}
+
+function attachPragmaticPurInitCapture(page) {
+  const handler = async response => {
+    try {
+      const request = response.request();
+      const post = request.postData() || '';
+      if (!/gameService/i.test(response.url())) return;
+      if (!/(?:^|&)action=doInit(?:&|$)/.test(post)) return;
+
+      const parsed = parsePragmaticPurInit(await response.text());
+      if (!parsed) return;
+
+      const frame = request.frame();
+      await frame.evaluate(value => {
+        globalThis.__parserPragmaticPurInit = value;
+      }, parsed).catch(() => {});
+    } catch {}
+  };
+
+  page.on('response', handler);
+  return handler;
+}
+
 async function settleSweepProvider(provider, frame, page, options, protocolBefore = null) {
   if (provider?.id !== 'belatra') return { waitedMs: 0, transitions: 0 };
 
@@ -297,6 +352,7 @@ async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, 
       network.push(summarizeRequest(req));
     }
   });
+  const pragmaticPurInitHandler = attachPragmaticPurInitCapture(page);
 
   const result = {
     option: purchaseOption,
@@ -356,6 +412,7 @@ async function runPurchaseFresh(browser, url, expectedProvider, purchaseOption, 
   } catch (error) {
     result.error = String(error?.stack || error?.message || error);
   } finally {
+    try { page.off('response', pragmaticPurInitHandler); } catch {}
     await context.close();
   }
   return result;
@@ -397,6 +454,7 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
     }
   };
   page.on('request', onRequest);
+  const pragmaticPurInitHandler = attachPragmaticPurInitCapture(page);
 
   console.log(`\n[${index}/${total}] ${url}`);
   try {
@@ -689,6 +747,7 @@ async function runOne(browser, url, actions, options, index, total, sharedSessio
     const file = path.join('results', `${String(index).padStart(4, '0')}-${safeName(url)}.json`);
     await writeJson(file, result);
     try { page.off('request', onRequest); } catch {}
+    try { page.off('response', pragmaticPurInitHandler); } catch {}
     if (ownsContext) await context.close();
   }
   return result;
