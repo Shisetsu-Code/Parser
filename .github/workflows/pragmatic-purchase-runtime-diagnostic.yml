@@ -1,0 +1,31 @@
+name: Pragmatic purchase runtime diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/pragmatic-purchase-runtime-diagnostic.mjs"
+      - ".github/workflows/pragmatic-purchase-runtime-diagnostic.yml"
+      - "src/providers/pragmatic.js"
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Run purchase runtime diagnostic
+        run: npm run pragmatic:purchase-diagnostic
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pragmatic-purchase-runtime-diagnostic
+          path: results/pragmatic-purchase-runtime-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 7
