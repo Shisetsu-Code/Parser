@@ -1,0 +1,38 @@
+name: Pragmatic random purchase audit more20
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/pragmatic-purchase-audit-more20.mjs"
+      - ".github/workflows/pragmatic-purchase-audit-more20.yml"
+      - "src/providers/pragmatic.js"
+      - "src/runner.js"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Run second random 20-game Pragmatic audit
+        run: npm run pragmatic:audit-more20
+      - name: Print compact audit
+        if: always()
+        run: |
+          if [ -f results/pragmatic-purchase-audit-more20.json ]; then
+            node -e "const x=require('./results/pragmatic-purchase-audit-more20.json'); for(const r of x.results){console.log([r.index,r.name,r.slug,'parser='+r.parserCount,'server='+r.serverCount,'verdict='+r.verdict].join(' | '))}; console.log('SUMMARY pass='+x.pass+' mismatch='+x.mismatch+' total='+x.total+' skipped='+x.skipped.length)"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pragmatic-purchase-audit-more20
+          path: results/pragmatic-purchase-audit-more20.json
+          if-no-files-found: warn
+          retention-days: 7
