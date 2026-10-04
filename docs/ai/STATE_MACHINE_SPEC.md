@@ -13,7 +13,7 @@ BASE:
 normal playable state.
 
 CONFIGURATION:
-pre-action state whose mutable settings alter purchase/feature semantics or branch topology. Examples: active lines, feature mode, volatility/ante mode when provider evidence marks it structural.
+pre-action state whose free mutable settings alter purchase/feature semantics or branch topology. Examples: active lines or a free mode selector. Paid Ante/Chance/Boost/Super-Spin controls are PURCHASE actions, not configuration.
 
 PURCHASE_MENU:
 one action exposed multiple feature purchase candidates.
@@ -208,3 +208,19 @@ NO_GAMEPLAY_EFFECT:
 action caused no gameplay request and no state change.
 
 Agents must not collapse these into generic "failed".
+
+
+## Paid modifier rule
+
+Any action that increases cost beyond the normal/base spin is a PURCHASE transition.
+
+Examples:
+- Ante Bet / Bonus Chance
+- Buy Feature / Free Spins Buy
+- Super Spin / Enhanced Spin
+- Booster
+- paid extra ball / extra draw
+
+A purchase can result in FREE_SPINS, BONUS, RESPIN, higher feature probability, enhanced symbols, or another mechanic. The resulting mechanic does not change the top-level classification: it remains PURCHASE.
+
+Free line-count/payline settings remain CONFIGURATION.
