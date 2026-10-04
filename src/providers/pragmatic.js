@@ -197,20 +197,22 @@ export const pragmatic = {
 
   async listPurchases(frame) {
     const collect = async () => frame.evaluate(() => {
-      if (!window.globalRuntime) return { options: [], pending: false };
+      if (!window.globalRuntime) return { options: [], pending: false, hasPurchaseRuntime: false };
       const roots = globalRuntime.sceneRoots || [];
       const out = new Map();
       let pending = false;
+      let hasPurchaseRuntime = false;
 
       if (window.FeaturePurchaseOption) {
         for (const root of roots) {
           let options = [];
           try { options = root.GetComponentsInChildren(FeaturePurchaseOption, true) || []; } catch {}
+          if (options.length) hasPurchaseRuntime = true;
           for (const option of options) {
             try {
               if (option.type === 1) continue;
               const index = Number(option.purchaseIndex);
-              if (!Number.isFinite(index)) continue;
+              if (!Number.isFinite(index) || index < 0) continue;
               const data = option.purchaseData;
               const reportedAvailable = data?.purchaseOptionIsAvailable?.[index] ?? null;
               const forceDisabled = option?.forceDisabled ?? null;
@@ -239,6 +241,7 @@ export const pragmatic = {
         for (const root of roots) {
           let managers = [];
           try { managers = root.GetComponentsInChildren(FeaturePurchaseV2, true) || []; } catch {}
+          if (managers.length) hasPurchaseRuntime = true;
           for (const manager of managers) {
             const options = manager.purchaseOptions || [];
             if (!options.length) pending = true;
@@ -246,7 +249,6 @@ export const pragmatic = {
             for (let index = 0; index < options.length; index++) {
               const option = options[index];
               if (!option) continue;
-
               const reportedAvailable =
                 manager.featurePurchaseData?.purchaseOptionIsAvailable?.[index] ?? null;
               const forceDisabled = option?.forceDisabled ?? null;
@@ -276,6 +278,7 @@ export const pragmatic = {
         for (const root of roots) {
           let managers = [];
           try { managers = root.GetComponentsInChildren(FeaturePurchaseManager, true) || []; } catch {}
+          if (managers.length) hasPurchaseRuntime = true;
           for (const manager of managers) {
             const costs = manager.purchaseCosts || [];
             if (!costs.length) pending = true;
@@ -297,20 +300,74 @@ export const pragmatic = {
 
       return {
         options: [...out.values()].sort((a, b) => a.index - b.index),
-        pending
+        pending,
+        hasPurchaseRuntime
       };
     });
 
-    let last = { options: [], pending: false };
+    const openPurchaseMenu = async () => frame.evaluate(() => {
+      const roots = window.globalRuntime?.sceneRoots || [];
+      if (!window.XTButton) return false;
 
-    // FeaturePurchaseV2 can exist before its purchaseOptions array is populated.
-    // Give that initialization a short bounded settle window instead of reporting
-    // a false zero-option result.
-    for (let attempt = 0; attempt < 9; attempt++) {
+      const invoke = button => {
+        try {
+          if (button.gameObject?.activeInHierarchy === false) return false;
+          if (typeof button.OnPress === 'function') {
+            button.OnPress(true);
+            button.OnPress(false);
+            return true;
+          }
+          if (typeof button.OnClick === 'function') {
+            button.OnClick();
+            return true;
+          }
+        } catch {}
+        return false;
+      };
+
+      const buttons = [];
+      for (const root of roots) {
+        try { buttons.push(...(root.GetComponentsInChildren(XTButton, true) || [])); } catch {}
+      }
+
+      const candidates = buttons.filter(button => {
+        try {
+          if (button.gameObject?.activeInHierarchy === false) return false;
+          const name = String(button.gameObject?.name || '');
+          const event = String(button.eventToCode?.name || '');
+          const text = (name + ' ' + event).toLowerCase();
+          return /(buy|purchase|feature)/.test(text) &&
+            !/(confirm|yes|no|close|cancel|rebuy)/.test(text);
+        } catch {
+          return false;
+        }
+      });
+
+      for (const button of candidates) {
+        if (invoke(button)) return true;
+      }
+      return false;
+    }).catch(() => false);
+
+    let last = { options: [], pending: false, hasPurchaseRuntime: false };
+    let opened = false;
+
+    // Some games instantiate FeaturePurchaseV2 only after the buy-feature interface
+    // is opened. Others populate purchaseOptions asynchronously. Probe both cases
+    // in a bounded window; do not count transient controls such as Rebuy (-1).
+    for (let attempt = 0; attempt < 12; attempt++) {
       last = await collect();
       if (last.options.length) return last.options;
-      if (!last.pending) return [];
-      await frame.page().waitForTimeout(200);
+
+      if (!opened && attempt >= 1) {
+        opened = await openPurchaseMenu();
+        if (opened) {
+          await frame.page().waitForTimeout(350);
+          continue;
+        }
+      }
+
+      await frame.page().waitForTimeout(last.pending || last.hasPurchaseRuntime ? 200 : 150);
     }
 
     return last.options;
