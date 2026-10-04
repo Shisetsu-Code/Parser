@@ -192,3 +192,57 @@ Bugs discovered and fixed during the audit:
 
 Remaining rule:
 when `purInit` is explicitly absent/zero, server truth must override empty/placeholder runtime purchase components.
+
+
+## Second random 20-game purchase audit — 2026-10-04
+
+Audit:
+`scripts/pragmatic-purchase-audit-more20.mjs`
+
+This audit runs a reproducible seeded random selection from a broad pool of official Pragmatic titles, excluding historical project coverage and the first 20-game audit. Invalid/non-demo candidates are skipped until 20 valid Pragmatic runtimes are collected.
+
+The normal Parser now captures `doInit` server `purInit` and exposes it to the Pragmatic adapter as session truth. `listPurchases()` uses that server count to:
+- reject runtime placeholders when `purInit=0`;
+- wait for lazy `FeaturePurchaseV2` initialization;
+- open Buy Feature UI when required;
+- exclude negative/transient indices such as Rebuy;
+- synthesize server-declared option descriptors only when the server declares an option but the UI handler has not materialized yet.
+
+Final sample:
+
+| game | Parser | server purInit | result |
+| --- | ---: | ---: | --- |
+| Great Rhino Megaways | 1 | 1 | PASS |
+| Wild Beach Party | 1 | 1 | PASS |
+| Wild Depths | 0 | 0 | PASS |
+| Big Bass Bonanza Keeping It Reel | 1 | 1 | PASS |
+| John Hunter and the Tomb of the Scarab Queen | 0 | 0 | PASS |
+| Diamond Strike | 0 | 0 | PASS |
+| Gates of Olympus | 1 | 1 | PASS |
+| Floating Dragon | 0 | 0 | PASS |
+| Empty the Bank | 1 | 1 | PASS |
+| Big Bass Floats My Boat | 2 | 2 | PASS |
+| Wild West Gold Blazing Bounty | 2 | 2 | PASS |
+| Fruit Party 2 | 1 | 1 | PASS |
+| Down the Rails | 0 | 0 | PASS |
+| 888 Dragons | 0 | 0 | PASS |
+| Gems Bonanza | 1 | 1 | PASS |
+| Cash Elevator | 0 | 0 | PASS |
+| Drago Jewels of Fortune | 1 | 1 | PASS |
+| Pyramid Bonanza | 0 | 0 | PASS |
+| Sweet Bonanza Xmas | 0 | 0 | PASS |
+| Starlight Princess | 1 | 1 | PASS |
+
+Result:
+- 20/20 exact Parser vs server `purInit` matches.
+- 0 mismatches.
+- 0 skipped/invalid candidates in the final selected 20.
+- 0 runtime errors.
+
+Combined evidence:
+- first audit v3: 19/20 exact before server-authority integration; Gates of Olympus POP exposed a runtime placeholder with server `purInit=0`;
+- server-authority rule was then integrated into the normal Parser;
+- second audit: 20/20 exact on a distinct sample.
+
+Conclusion:
+for Pragmatic purchase count, server `doInit.purInit` is authoritative for the current session. Runtime controls are implementation handles, not purchase-count truth.
