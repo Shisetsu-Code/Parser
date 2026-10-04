@@ -222,11 +222,21 @@ for (const [name,slug,index] of CASES) {
 
     await runtime.provider.waitReady?.(runtime.frame,10000).catch(()=>null);
     row.options=await runtime.provider.listPurchases(runtime.frame);
-    row.before=await inspect(runtime.frame);
-    row.press=await runtime.provider.purchase(runtime.frame,index);
-    row.after=await inspect(runtime.frame);
+
+    // Execute from a clean post-discovery session, matching production buy_all.
+    await page.goto(urlFor(slug),{waitUntil:'domcontentloaded',timeout:30000});
+    await page.waitForTimeout(2200);
+    await bootstrapSupportedPage(page);
+    const executionRuntime=await findRuntime(page,30000);
+    if(!executionRuntime || executionRuntime.provider.id!=='pragmatic') throw new Error('execution runtime not found');
+    const ready=await executionRuntime.provider.waitReady?.(executionRuntime.frame,10000).catch(()=>null);
+    if(!ready?.ok) throw new Error('execution base state not ready');
+
+    row.before=await inspect(executionRuntime.frame);
+    row.press=await executionRuntime.provider.purchase(executionRuntime.frame,index);
+    row.after=await inspect(executionRuntime.frame);
     await page.waitForTimeout(1500);
-    row.afterWait=await inspect(runtime.frame);
+    row.afterWait=await inspect(executionRuntime.frame);
 
     console.log(
       '  options='+row.options.length+
