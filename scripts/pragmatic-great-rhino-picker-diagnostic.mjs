@@ -351,6 +351,13 @@ async function oneBranch(browser,branch) {
       ' clickDiff='+Object.keys(row.diffs.click||{}).join(',')+
       ' pressDiff='+Object.keys(row.diffs.press||{}).join(',')
     );
+    console.log(
+      'RHINO_CLICK_BUTTONS added='+JSON.stringify(row.diffs.clickButtons?.added||[])+
+      ' removed='+JSON.stringify(row.diffs.clickButtons?.removed||[])
+    );
+    console.log(
+      'RHINO_CLICK_VARS '+JSON.stringify(row.diffs.click||{})
+    );
   } catch(error) {
     row.status='ERROR';
     row.error=String(error?.stack||error?.message||error);
