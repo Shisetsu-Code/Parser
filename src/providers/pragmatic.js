@@ -387,6 +387,14 @@ export const pragmatic = {
         canSpin: (() => {
           try { return globalThis.Vars?.CanSpin ? XT.GetBool(Vars.CanSpin) : null; }
           catch { return null; }
+        })(),
+        pickedItemIndexLocal: (() => {
+          try {
+            const ref = globalThis.Vars?.PickedItemIndexLocal_FSBGPick;
+            return ref && typeof XT.GetInt === 'function' ? XT.GetInt(ref) : null;
+          } catch {
+            return null;
+          }
         })()
       };
     }).catch(() => ({ pickerCount: null, pickers: [], canSpin: null }));
@@ -487,14 +495,20 @@ export const pragmatic = {
     const before = await inspect();
     const attempts = [];
 
-    for (const strategy of ['press', 'click', 'event']) {
+    for (const strategy of ['click', 'press', 'event']) {
       const action = await invoke(strategy);
       await frame.page().waitForTimeout(450);
       const after = await inspect();
 
       attempts.push({ strategy, action, after });
 
+      const pickedIndexChanged =
+        Number.isFinite(Number(after?.pickedItemIndexLocal)) &&
+        Number(after.pickedItemIndexLocal) >= 0 &&
+        Number(after.pickedItemIndexLocal) !== Number(before?.pickedItemIndexLocal);
+
       const changed =
+        pickedIndexChanged ||
         after?.pickerCount === 0 ||
         after?.canSpin === true ||
         (
