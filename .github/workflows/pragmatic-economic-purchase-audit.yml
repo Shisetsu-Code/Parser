@@ -1,15 +1,9 @@
 name: Pragmatic economic purchase audit
 
+# Deprecated: retained only for manual historical/debug runs.
+# The active Parser scope no longer varies base wager/price.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "scripts/pragmatic-economic-purchase-audit.mjs"
-      - ".github/workflows/pragmatic-economic-purchase-audit.yml"
-      - "src/providers/pragmatic.js"
-      - "src/tree-crawler.js"
-      - "src/runner.js"
 
 jobs:
   audit:
