@@ -213,12 +213,20 @@ export const pragmatic = {
 
         if (acted) continue;
 
+        const introOwnsCurrentPicker =
+          last?.preBaseSelection === true &&
+          last?.shouldDisplayIntro === true &&
+          last?.purInitReady !== true;
+
         const canUseIntroEvent =
-          last?.preBaseSelection !== true &&
           last?.hasIntroCloseEvent === true &&
           (
             last?.shouldDisplayIntro === true ||
             last?.gameHasIntro === true
+          ) &&
+          (
+            last?.preBaseSelection !== true ||
+            introOwnsCurrentPicker
           );
 
         if (canUseIntroEvent && !attempted.has('event|Evt_DataToCode_IntroClosePressed')) {
