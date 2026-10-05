@@ -339,7 +339,7 @@ async function oneBranch(browser,branch) {
   };
   page.on('response',handler);
 
-  const row={branch,status:'UNKNOWN',selection:null,before:null,afterClick:null,afterPress:null,afterEvent:null,diffs:{},error:null};
+  const row={branch,status:'UNKNOWN',selection:null,before:null,afterClick:null,afterPress:null,afterEvent:null,directHandlers:[],diffs:{},error:null};
 
   try {
     await page.goto(URL,{waitUntil:'domcontentloaded',timeout:60000});
@@ -409,6 +409,60 @@ async function oneBranch(browser,branch) {
       row.diffs[name]=diffVars(prior.varSnapshot,state.varSnapshot);
       row.diffs[name+'Buttons']=diffButtons(prior.activeButtons,state.activeButtons);
       prior=state;
+    }
+
+    // Probe the exact runtime handlers discovered from function source.
+    // This is diagnostic-only: production must prefer the provider event path
+    // unless direct handler invocation is proven necessary.
+    for (const probe of ['FSOptions.OnOptionPicked','VideoSlotsConnectionXTLayer.OnItemPickedFSBGPick']) {
+      const beforeResponses=responses.length;
+      const action=await runtime.frame.evaluate(probe=>{
+        try {
+          const roots=globalThis.globalRuntime?.sceneRoots||[];
+          const [className,methodName]=String(probe).split('.');
+          const Ctor=globalThis[className];
+          if(typeof Ctor!=='function') return {ok:false,reason:'constructor unavailable '+className};
+
+          const instances=[];
+          for(let ri=0;ri<roots.length;ri++) {
+            let items=[];
+            try { items=roots[ri].GetComponentsInChildren(Ctor,true)||[]; } catch {}
+            for(const item of items) instances.push({ri,item});
+          }
+
+          const target=instances.find(x=>typeof x.item?.[methodName]==='function');
+          if(!target) return {ok:false,reason:'method unavailable '+probe};
+
+          target.item[methodName]();
+          return {
+            ok:true,
+            probe,
+            root:target.ri,
+            name:(()=>{try{return target.item.gameObject?.name??null}catch{return null}})()
+          };
+        } catch(error) {
+          return {ok:false,reason:String(error?.message||error)};
+        }
+      },probe).catch(error=>({ok:false,reason:String(error?.message||error)}));
+
+      await page.waitForTimeout(1200);
+      await Promise.allSettled([...tasks]);
+
+      const traffic=responses.slice(beforeResponses).map(s=>({
+        request:form(s.requestPostData||''),
+        response:form(s.body||'')
+      }));
+
+      const state=await inspectRuntime(runtime.frame,row.selection);
+      row.directHandlers.push({probe,action,traffic,state});
+
+      console.log(
+        'RHINO_DIRECT probe='+probe+
+        ' ok='+(action?.ok===true)+
+        ' traffic='+traffic.map(x=>(x.request?.action||'-')+'/ind:'+(x.request?.ind??'-')+'/na:'+(x.response?.na??'-')+'/bgid:'+(x.response?.bgid??'-')).join(',')
+      );
+
+      if(traffic.length) break;
     }
 
     row.status='DONE';
