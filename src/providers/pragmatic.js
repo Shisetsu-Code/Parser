@@ -484,52 +484,34 @@ export const pragmatic = {
       };
     }
 
-    const send = await frame.evaluate(({ optionIndex }) => {
+    const send = await frame.evaluate(() => {
       try {
-        const roots = globalThis.globalRuntime?.sceneRoots || [];
-        const Ctor = globalThis.BonusPickConnection;
-        if (typeof Ctor !== 'function') {
-          return { ok:false, reason:'BonusPickConnection unavailable' };
+        const event = globalThis.Vars?.Evt_ToServer_ItemPickedFSBGPick;
+        if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
+          return {
+            ok:false,
+            reason:'Evt_ToServer_ItemPickedFSBGPick unavailable'
+          };
         }
 
-        const connections = [];
-        for (const root of roots) {
-          try {
-            connections.push(...(root.GetComponentsInChildren(Ctor, true) || []));
-          } catch {}
-        }
-
-        const connection = connections.find(item =>
-          item &&
-          item.gameObject?.activeInHierarchy !== false &&
-          typeof item.SendItemPick === 'function'
-        ) || connections.find(item => typeof item?.SendItemPick === 'function');
-
-        if (!connection) {
-          return { ok:false, reason:'BonusPickConnection.SendItemPick unavailable' };
-        }
-
-        connection.SendItemPick(Number(optionIndex));
+        XT.TriggerEvent(event);
 
         return {
           ok:true,
-          strategy:'BonusPickConnection.SendItemPick(optionIndex)',
-          optionIndex:Number(optionIndex),
-          connectionName:connection.gameObject?.name ?? null
+          strategy:'XT.TriggerEvent(Vars.Evt_ToServer_ItemPickedFSBGPick)'
         };
       } catch (error) {
         return { ok:false, reason:String(error?.message || error) };
       }
-    }, { optionIndex }).catch(error => ({
+    }).catch(error => ({
       ok:false,
       reason:String(error?.message || error)
     }));
-
     if (!send?.ok) {
       return {
         ok:false,
         selection,
-        reason:send?.reason || 'BonusPickConnection send failed',
+        reason:send?.reason || 'FSBG ToServer selection failed',
         choose,
         send,
         afterChoose
@@ -573,7 +555,7 @@ export const pragmatic = {
     return {
       ok:true,
       selection,
-      strategy:'XTButton.OnClick() + BonusPickConnection.SendItemPick(optionIndex)',
+      strategy:'XTButton.OnClick() + XT.TriggerEvent(Vars.Evt_ToServer_ItemPickedFSBGPick)',
       choose,
       send,
       finalize,
