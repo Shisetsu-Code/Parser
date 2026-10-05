@@ -158,6 +158,8 @@ async function inspectRuntime(frame, selection) {
       'Evt_DataToCode_ItemPickedFSBGPick',
       'Evt_ToServer_ItemPickedFSBGPick',
       'FSBG_CloseConfirmation',
+      'Evt_DataToCode_EndGameFSBGPick',
+      'EndGameFSBGPick',
       'SpinsWon_FSBGPick',
       'evtBonusPickRequest',
       'evtFSBGPickRequest',
@@ -415,9 +417,12 @@ async function oneBranch(browser,branch) {
     console.log('RHINO_PROTOCOL_BONUS_OBJECTS '+JSON.stringify(protocolState?.bonusObjects||{}));
 
     for (const cls of row.before?.globalClasses || []) {
-      if (!/^(BonusPickConnection|PickableFSOption|PickableFSOption_GRM)$/.test(cls.key)) continue;
+      if (!/^(BonusPickConnection|PickableFSOption|PickableFSOption_GRM|FSOptions)$/.test(cls.key)) continue;
       for (const ex of cls.examples || []) {
         console.log('RHINO_CLASS='+cls.key+' name='+String(ex.name||'-')+' fields='+JSON.stringify(ex.fields||{}));
+        if(cls.key==='FSOptions') {
+          console.log('RHINO_FSOPTIONS_FIELDS '+JSON.stringify(ex.fields||{}));
+        }
         for (const m of ex.methodDetails || []) {
           console.log(
             'RHINO_METHOD class='+cls.key+
