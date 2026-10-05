@@ -63,6 +63,23 @@ async function inspectRuntime(frame, selection) {
       try { return typeof object?.[name]==='function'; } catch { return false; }
     });
 
+    const methodDetails=(object,rx)=>methodNames(object)
+      .filter(name=>rx.test(name))
+      .slice(0,30)
+      .map(name=>{
+        let fn=null;
+        let source=null;
+        let length=null;
+        try {
+          fn=object?.[name];
+          length=typeof fn==='function' ? fn.length : null;
+          source=typeof fn==='function'
+            ? Function.prototype.toString.call(fn).slice(0,4000)
+            : null;
+        } catch {}
+        return {name,length,source};
+      });
+
     let target=null;
     let rootIndex=Number(selection?.root);
     const root=roots[rootIndex];
@@ -128,7 +145,8 @@ async function inspectRuntime(frame, selection) {
             name:(()=>{try{return item.gameObject?.name??null}catch{return null}})(),
             active:(()=>{try{return item.gameObject?.activeInHierarchy??null}catch{return null}})(),
             fields:primitiveFields(item),
-            methods:methodNames(item).filter(name=>/pick|select|option|click|press|close|confirm|start|continue/i.test(name)).slice(0,80)
+            methods:methodNames(item).filter(name=>/pick|select|option|click|press|close|confirm|start|continue/i.test(name)).slice(0,80),
+            methodDetails:methodDetails(item,/pick|select|send|handler|click|press|close|confirm|start|continue/i)
           });
         }
       }
@@ -163,6 +181,7 @@ async function inspectRuntime(frame, selection) {
         constructor:target?.constructor?.name??null,
         fields:primitiveFields(target),
         methods:methodNames(target).slice(0,120),
+        methodDetails:methodDetails(target,/onclick|onpress|doit|pick|select|send|close|confirm/i),
         eventToCode:target.eventToCode?{
           constructor:target.eventToCode?.constructor?.name??null,
           fields:primitiveFields(target.eventToCode),
@@ -285,7 +304,7 @@ async function oneBranch(browser,branch) {
 
 const browser=await chromium.launch({headless:true});
 const results=[];
-for(let branch=0;branch<4;branch++) results.push(await oneBranch(browser,branch));
+for(const branch of [0]) results.push(await oneBranch(browser,branch));
 await browser.close();
 
 await writeJson('results/pragmatic-great-rhino-picker-diagnostic.json',{
