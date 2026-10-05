@@ -156,10 +156,13 @@ async function inspectRuntime(frame, selection) {
     const needles=[
       'PickedItemIndexLocal_FSBGPick',
       'Evt_DataToCode_ItemPickedFSBGPick',
+      'Evt_ToServer_ItemPickedFSBGPick',
       'FSBG_CloseConfirmation',
       'SpinsWon_FSBGPick',
       'evtBonusPickRequest',
-      'SendItemPick'
+      'SendItemPick',
+      'FSBG_SendPick',
+      'FSOption_SendPick'
     ];
 
     const recordMethodHits=(ownerLabel,object)=>{
@@ -171,7 +174,8 @@ async function inspectRuntime(frame, selection) {
         } catch {}
         if(!source) continue;
         const matched=needles.filter(needle=>source.includes(needle));
-        if(!matched.length) continue;
+        const namedTarget=/^(?:FSBG_SendPick|FSOption_SendPick|HasFreeSpinOptions|EndOfOptionTransition|OnResponseReceived|OnCloseConfirmation|OnOptionPicked|OnItemPickedFSBGPick)$/i.test(methodName);
+        if(!matched.length && !namedTarget) continue;
         sourceHits.push({
           owner:ownerLabel,
           method:methodName,
@@ -199,7 +203,17 @@ async function inspectRuntime(frame, selection) {
           if(!item || seenObjects.has(item)) continue;
           seenObjects.add(item);
           const name=(()=>{try{return item.gameObject?.name??null}catch{return null}})();
-          recordMethodHits('root'+ri+':'+globalKey+':'+String(name||ii),item);
+          const owner='root'+ri+':'+globalKey+':'+String(name||ii);
+          recordMethodHits(owner,item);
+
+          for (const fieldName of ['vsc','bonusConnection','xtLayer','connection','connector']) {
+            try {
+              const nested=item?.[fieldName];
+              if(nested && typeof nested==='object') {
+                recordMethodHits(owner+'.'+fieldName+':'+String(nested?.constructor?.name||'object'),nested);
+              }
+            } catch {}
+          }
         }
       }
     }
