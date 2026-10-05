@@ -290,6 +290,10 @@ async function oneBranch(browser,branch) {
 
     row.before=await inspectRuntime(runtime.frame,row.selection);
 
+    const protocolState=await runtime.provider.protocolState?.(runtime.frame).catch(()=>null);
+    console.log('RHINO_PROTOCOL_TRANSPORT '+JSON.stringify(protocolState?.transportObjects||[]));
+    console.log('RHINO_PROTOCOL_BONUS_OBJECTS '+JSON.stringify(protocolState?.bonusObjects||{}));
+
     for (const cls of row.before?.globalClasses || []) {
       if (!/^(BonusPickConnection|PickableFSOption|PickableFSOption_GRM)$/.test(cls.key)) continue;
       for (const ex of cls.examples || []) {
