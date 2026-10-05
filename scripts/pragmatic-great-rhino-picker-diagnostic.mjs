@@ -278,7 +278,7 @@ async function oneBranch(browser,branch) {
   const row={branch,status:'UNKNOWN',selection:null,before:null,afterClick:null,afterPress:null,afterEvent:null,diffs:{},error:null};
 
   try {
-    await page.goto(URL,{waitUntil:'domcontentloaded',timeout:30000});
+    await page.goto(URL,{waitUntil:'domcontentloaded',timeout:60000});
     await page.waitForTimeout(2200);
     await bootstrapSupportedPage(page);
     const runtime=await findRuntime(page,30000);
