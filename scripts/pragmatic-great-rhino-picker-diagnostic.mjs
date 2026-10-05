@@ -160,6 +160,10 @@ async function inspectRuntime(frame, selection) {
       'FSBG_CloseConfirmation',
       'SpinsWon_FSBGPick',
       'evtBonusPickRequest',
+      'evtFSBGPickRequest',
+      'evtFSOptionPickRequest',
+      'FSBGPickRequest',
+      'FSOptionPickRequest',
       'SendItemPick',
       'FSBG_SendPick',
       'FSOption_SendPick'
