@@ -486,11 +486,15 @@ export const pragmatic = {
 
     const send = await frame.evaluate(() => {
       try {
-        const event = globalThis.Vars?.Evt_ToServer_ItemPickedFSBGPick;
+        // Runtime evidence:
+        // FSOptions.OnOptionPicked is registered to this DataToCode event.
+        // That handler reads PickedItemIndexLocal_FSBGPick, disables sibling
+        // inputs, then triggers Evt_ToServer_ItemPickedFSBGPick itself.
+        const event = globalThis.Vars?.Evt_DataToCode_ItemPickedFSBGPick;
         if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
           return {
             ok:false,
-            reason:'Evt_ToServer_ItemPickedFSBGPick unavailable'
+            reason:'Evt_DataToCode_ItemPickedFSBGPick unavailable'
           };
         }
 
@@ -498,7 +502,7 @@ export const pragmatic = {
 
         return {
           ok:true,
-          strategy:'XT.TriggerEvent(Vars.Evt_ToServer_ItemPickedFSBGPick)'
+          strategy:'XT.TriggerEvent(Vars.Evt_DataToCode_ItemPickedFSBGPick)'
         };
       } catch (error) {
         return { ok:false, reason:String(error?.message || error) };
@@ -511,7 +515,7 @@ export const pragmatic = {
       return {
         ok:false,
         selection,
-        reason:send?.reason || 'FSBG ToServer selection failed',
+        reason:send?.reason || 'FSBG DataToCode selection failed',
         choose,
         send,
         afterChoose
@@ -555,7 +559,7 @@ export const pragmatic = {
     return {
       ok:true,
       selection,
-      strategy:'XTButton.OnClick() + XT.TriggerEvent(Vars.Evt_ToServer_ItemPickedFSBGPick)',
+      strategy:'XTButton.OnClick() + XT.TriggerEvent(Vars.Evt_DataToCode_ItemPickedFSBGPick)',
       choose,
       send,
       finalize,
