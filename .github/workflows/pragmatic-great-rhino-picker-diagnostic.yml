@@ -22,11 +22,30 @@ jobs:
       - run: npx playwright install chromium
       - name: Run Great Rhino picker diagnostic
         run: npm run pragmatic:rhino-diagnostic
-      - name: Print compact result
+      - name: Print diagnostic detail
         if: always()
         run: |
           if [ -f results/pragmatic-great-rhino-picker-diagnostic.json ]; then
-            node -e "const x=require('./results/pragmatic-great-rhino-picker-diagnostic.json'); for(const r of x.results){console.log('BRANCH',r.branch,'status='+r.status,'classes='+(r.before?.globalClasses||[]).map(c=>c.key+':'+c.count).join(','),'clickDiff='+Object.keys(r.diffs?.click||{}).join(','),'pressDiff='+Object.keys(r.diffs?.press||{}).join(','),'error='+(r.error?String(r.error).split('\n')[0]:'-'))}"
+            node - <<'NODE'
+            const x=require('./results/pragmatic-great-rhino-picker-diagnostic.json');
+            for (const r of x.results) {
+              console.log('BRANCH',r.branch,'status='+r.status,'clickDiff='+Object.keys(r.diffs?.click||{}).join(','));
+              const classes=r.before?.globalClasses||[];
+              for (const cls of classes) {
+                if (!/BonusPickConnection|PickableFSOption/.test(cls.key)) continue;
+                console.log('CLASS',cls.key,'count='+cls.count);
+                for (const ex of cls.examples||[]) {
+                  console.log(' EXAMPLE',ex.name,'active='+ex.active,'fields='+JSON.stringify(ex.fields||{}));
+                  console.log(' METHODS',JSON.stringify(ex.methods||[]));
+                  for (const m of ex.methodDetails||[]) {
+                    console.log('  METHOD',m.name,'len='+m.length,'src='+String(m.source||'').replace(/\s+/g,' ').slice(0,1800));
+                  }
+                }
+              }
+              console.log('VARS',JSON.stringify(r.before?.varSnapshot||{}));
+              console.log('ERROR',r.error?String(r.error).split('\n')[0]:'-');
+            }
+            NODE
           fi
       - uses: actions/upload-artifact@v4
         if: always()
