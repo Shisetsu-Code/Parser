@@ -867,6 +867,15 @@ async function probePreBaseBranches(browser, slug) {
     const runtime=await findRuntime(page,12000);
     if (!runtime || runtime.provider.id!=='pragmatic') return [null];
 
+    // First let the provider clear intro/tutorial states. Only branch when
+    // waitReady explicitly proves a genuine gameplay selection remains.
+    const ready=await runtime.provider.waitReady?.(runtime.frame,7000).catch(()=>null);
+    if (ready?.ok === true) return [null];
+
+    if (!/pre-base selection requires explicit branch handling/i.test(String(ready?.reason||''))) {
+      return [null];
+    }
+
     const selections=await runtime.provider.listPreBaseSelections?.(runtime.frame) ?? [];
     if (!selections.length) return [null];
     return selections.map((_,index)=>index);
