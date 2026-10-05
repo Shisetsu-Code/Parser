@@ -1,0 +1,37 @@
+name: Pragmatic edge cases smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/pragmatic-edge-cases-smoke.mjs"
+      - ".github/workflows/pragmatic-edge-cases-smoke.yml"
+      - "src/providers/pragmatic.js"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Run edge-case smoke
+        run: npm run pragmatic:edge-smoke
+      - name: Print result
+        if: always()
+        run: |
+          if [ -f results/pragmatic-edge-cases-smoke.json ]; then
+            node -e "const x=require('./results/pragmatic-edge-cases-smoke.json'); console.log('RHINO',x.greatRhino.map(r=>({branch:r.branch,status:r.status,ready:r.ready?.ok,finalize:r.press?.finalize}))); console.log('GEMS',x.gems.status,x.gems.steps.map(s=>({i:s.iteration,cont:s.continuation,fresh:s.fresh})))"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pragmatic-edge-cases-smoke
+          path: results/pragmatic-edge-cases-smoke.json
+          if-no-files-found: warn
+          retention-days: 7
