@@ -338,6 +338,8 @@ async function oneBranch(browser,branch) {
   const context=await browser.newContext({viewport:{width:1440,height:900}});
   const page=await context.newPage();
   const responses=[];
+  const requests=[];
+  const websocketFrames=[];
   const tasks=new Set();
 
   const handler=response=>{
@@ -355,9 +357,45 @@ async function oneBranch(browser,branch) {
     })().catch(()=>{}).finally(()=>tasks.delete(task));
     tasks.add(task);
   };
-  page.on('response',handler);
 
-  const row={branch,status:'UNKNOWN',selection:null,before:null,afterClick:null,afterPress:null,afterEvent:null,directHandlers:[],diffs:{},error:null};
+  const requestHandler=request=>{
+    try {
+      if(request.method()==='GET' && !/gameService/i.test(request.url())) return;
+      requests.push({
+        at:Date.now(),
+        method:request.method(),
+        url:request.url(),
+        postData:request.postData()
+      });
+    } catch {}
+  };
+
+  const websocketHandler=ws=>{
+    try {
+      ws.on('framesent',event=>{
+        websocketFrames.push({
+          at:Date.now(),
+          direction:'sent',
+          url:ws.url(),
+          payload:typeof event.payload==='string' ? event.payload.slice(0,12000) : '[binary]'
+        });
+      });
+      ws.on('framereceived',event=>{
+        websocketFrames.push({
+          at:Date.now(),
+          direction:'received',
+          url:ws.url(),
+          payload:typeof event.payload==='string' ? event.payload.slice(0,12000) : '[binary]'
+        });
+      });
+    } catch {}
+  };
+
+  page.on('response',handler);
+  page.on('request',requestHandler);
+  page.on('websocket',websocketHandler);
+
+  const row={branch,status:'UNKNOWN',selection:null,before:null,afterClick:null,afterPress:null,afterEvent:null,directHandlers:[],requests,websocketFrames,diffs:{},error:null};
 
   try {
     await page.goto(URL,{waitUntil:'domcontentloaded',timeout:60000});
@@ -434,6 +472,8 @@ async function oneBranch(browser,branch) {
     // unless direct handler invocation is proven necessary.
     for (const probe of ['FSOptions.OnOptionPicked','VideoSlotsConnectionXTLayer.OnItemPickedFSBGPick']) {
       const beforeResponses=responses.length;
+      const beforeRequests=requests.length;
+      const beforeWebSocket=websocketFrames.length;
       const action=await runtime.frame.evaluate(probe=>{
         try {
           const roots=globalThis.globalRuntime?.sceneRoots||[];
@@ -471,13 +511,17 @@ async function oneBranch(browser,branch) {
         response:form(s.body||'')
       }));
 
+      const requestDelta=requests.slice(beforeRequests);
+      const websocketDelta=websocketFrames.slice(beforeWebSocket);
       const state=await inspectRuntime(runtime.frame,row.selection);
-      row.directHandlers.push({probe,action,traffic,state});
+      row.directHandlers.push({probe,action,traffic,requestDelta,websocketDelta,state});
 
       console.log(
         'RHINO_DIRECT probe='+probe+
         ' ok='+(action?.ok===true)+
-        ' traffic='+traffic.map(x=>(x.request?.action||'-')+'/ind:'+(x.request?.ind??'-')+'/na:'+(x.response?.na??'-')+'/bgid:'+(x.response?.bgid??'-')).join(',')
+        ' traffic='+traffic.map(x=>(x.request?.action||'-')+'/ind:'+(x.request?.ind??'-')+'/na:'+(x.response?.na??'-')+'/bgid:'+(x.response?.bgid??'-')).join(',')+
+        ' requests='+requestDelta.map(x=>x.method+' '+x.url+' '+String(x.postData||'').slice(0,500)).join(' || ')+
+        ' ws='+websocketDelta.map(x=>x.direction+' '+x.url+' '+x.payload).join(' || ')
       );
 
       if(traffic.length) break;
@@ -513,6 +557,8 @@ async function oneBranch(browser,branch) {
   } finally {
     await Promise.allSettled([...tasks]);
     page.off('response',handler);
+    page.off('request',requestHandler);
+    page.off('websocket',websocketHandler);
     await context.close();
   }
 
