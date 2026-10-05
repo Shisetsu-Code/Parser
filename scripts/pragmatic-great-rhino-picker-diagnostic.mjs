@@ -152,6 +152,69 @@ async function inspectRuntime(frame, selection) {
       if(Object.keys(values).length) varSnapshot[key]=values;
     }
 
+    const sourceHits=[];
+    const needles=[
+      'PickedItemIndexLocal_FSBGPick',
+      'Evt_DataToCode_ItemPickedFSBGPick',
+      'FSBG_CloseConfirmation',
+      'SpinsWon_FSBGPick',
+      'evtBonusPickRequest',
+      'SendItemPick'
+    ];
+
+    const recordMethodHits=(ownerLabel,object)=>{
+      if(!object) return;
+      for(const methodName of methodNames(object)) {
+        let source='';
+        try {
+          source=Function.prototype.toString.call(object[methodName]);
+        } catch {}
+        if(!source) continue;
+        const matched=needles.filter(needle=>source.includes(needle));
+        if(!matched.length) continue;
+        sourceHits.push({
+          owner:ownerLabel,
+          method:methodName,
+          matched,
+          source:source.replace(/\s+/g,' ').slice(0,6000)
+        });
+      }
+    };
+
+    // Search provider/runtime components instead of guessing which class owns
+    // the FSBG selection submit transition.
+    for(let ri=0;ri<roots.length;ri++) {
+      const root=roots[ri];
+      const seenObjects=new Set();
+
+      for(const globalKey of Object.keys(globalThis)) {
+        const Ctor=globalThis[globalKey];
+        if(typeof Ctor!=='function') continue;
+        if(!/fs|free|pick|bonus|option|rhino|game|manager|connection/i.test(globalKey)) continue;
+
+        let items=[];
+        try { items=root.GetComponentsInChildren(Ctor,true)||[]; } catch {}
+        for(let ii=0;ii<items.length;ii++) {
+          const item=items[ii];
+          if(!item || seenObjects.has(item)) continue;
+          seenObjects.add(item);
+          const name=(()=>{try{return item.gameObject?.name??null}catch{return null}})();
+          recordMethodHits('root'+ri+':'+globalKey+':'+String(name||ii),item);
+        }
+      }
+    }
+
+    // Event/value objects themselves sometimes own the transition callback.
+    for(const key of Object.keys(globalThis.Vars||{})) {
+      if(!/fsbg|pick|free.*spin|bonus/i.test(key)) continue;
+      try {
+        const ref=Vars[key];
+        if(!ref) continue;
+        const obj=XT.GetObject?.(ref);
+        if(obj && typeof obj==='object') recordMethodHits('Vars.'+key,obj);
+      } catch {}
+    }
+
     const globalClasses=[];
     for(const key of Object.keys(globalThis)) {
       if(!/fsbg|pick|confirm|free.*spin.*option|bonus.*option/i.test(key)) continue;
@@ -215,7 +278,8 @@ async function inspectRuntime(frame, selection) {
         gameObject:gameObjectSummary
       }:null,
       varSnapshot,
-      globalClasses
+      globalClasses,
+      sourceHits
     };
   },{selection});
 }
@@ -362,6 +426,14 @@ async function oneBranch(browser,branch) {
     console.log(
       'RHINO_CLICK_VARS '+JSON.stringify(row.diffs.click||{})
     );
+    for(const hit of row.before?.sourceHits||[]) {
+      console.log(
+        'RHINO_SOURCE_HIT owner='+hit.owner+
+        ' method='+hit.method+
+        ' matched='+hit.matched.join(',')+
+        ' src='+hit.source
+      );
+    }
   } catch(error) {
     row.status='ERROR';
     row.error=String(error?.stack||error?.message||error);
