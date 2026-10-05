@@ -549,17 +549,45 @@ async function oneBranch(browser,branch) {
 
     await page.waitForTimeout(1200);
     await Promise.allSettled([...tasks]);
-    const endState=await inspectRuntime(runtime.frame,row.selection);
+
+    let endState=null;
+    let reacquired=null;
+    let readyAfterEnd=null;
+    let selectionsAfterEnd=[];
+
+    try {
+      reacquired=await findRuntime(page,5000);
+    } catch {}
+
+    if(reacquired?.provider?.id==='pragmatic') {
+      try {
+        endState=await inspectRuntime(reacquired.frame,row.selection);
+      } catch {}
+      try {
+        selectionsAfterEnd=await reacquired.provider.listPreBaseSelections?.(reacquired.frame) ?? [];
+      } catch {}
+      try {
+        readyAfterEnd=await reacquired.provider.waitReady?.(reacquired.frame,5000) ?? null;
+      } catch {}
+    }
+
     row.endGameProbe={
       action:endGame,
       requestDelta:requests.slice(beforeEndRequests),
       responseDelta:responses.slice(beforeEndResponses),
+      reacquired:Boolean(reacquired),
+      frameUrl:reacquired?.frame?.url?.() ?? null,
+      ready:readyAfterEnd,
+      selectionsAfterEnd,
       state:endState
     };
     console.log(
       'RHINO_ENDGAME ok='+(endGame?.ok===true)+
+      ' reacquired='+Boolean(reacquired)+
+      ' ready='+(readyAfterEnd?.ok===true)+
       ' canSpin='+(endState?.canSpin??'-')+
       ' pickerCount='+(endState?.pickerCount??'-')+
+      ' selections='+selectionsAfterEnd.length+
       ' requests='+row.endGameProbe.requestDelta.length+
       ' responses='+row.endGameProbe.responseDelta.length
     );
