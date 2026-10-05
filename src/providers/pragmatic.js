@@ -1090,9 +1090,37 @@ export const pragmatic = {
         };
       }
 
-      // Cascade/multi-cascade responses can leave the runtime in an animation
-      // phase with StopSpin active and CanSpin=false. Ending that animation is the
-      // explicit runtime transition that allows the next cascade/server request.
+      // If the runtime is already spin-capable, request the next server spin
+      // even when a StopSpin overlay is still active. Gems-style cascades can
+      // expose StopSpin while CanSpin=true; in that state Stop only affects the
+      // animation and does not advance the protocol.
+      if (state?.canSpin === true) {
+        const spin = await frame.evaluate(() => {
+          try {
+            const event =
+              globalThis.Vars?.Evt_ToServer_RequestSpin ||
+              globalThis.Vars?.Evt_DataToCode_Pressed_Spin;
+            if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
+              return { ok: false, reason: 'Pragmatic spin event unavailable' };
+            }
+            XT.TriggerEvent(event);
+            return {
+              ok: true,
+              kind: 'protocol-spin',
+              strategy:
+                event === Vars.Evt_ToServer_RequestSpin
+                  ? 'XT.TriggerEvent(Vars.Evt_ToServer_RequestSpin)'
+                  : 'XT.TriggerEvent(Vars.Evt_DataToCode_Pressed_Spin)'
+            };
+          } catch (error) {
+            return { ok: false, reason: String(error?.message || error) };
+          }
+        });
+        return { ...spin, state };
+      }
+
+      // Only when CanSpin=false do we use the active StopSpin control to finish
+      // a cascade animation/interstitial and expose the next actionable state.
       if (
         String(exchange?.rs || '').toLowerCase() === 'mc' &&
         state?.stopActive === true
@@ -1120,35 +1148,6 @@ export const pragmatic = {
         });
 
         return { ...stop, state };
-      }
-
-      // If the runtime is already spin-capable, the server response itself has
-      // completed any start-confirmation phase. Use the internal server-request
-      // event directly; do not infer a pending confirmation from the global
-      // FSStartNeedsConfirmation configuration flag.
-      if (state?.canSpin === true) {
-        const spin = await frame.evaluate(() => {
-          try {
-            const event =
-              globalThis.Vars?.Evt_ToServer_RequestSpin ||
-              globalThis.Vars?.Evt_DataToCode_Pressed_Spin;
-            if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
-              return { ok: false, reason: 'Pragmatic spin event unavailable' };
-            }
-            XT.TriggerEvent(event);
-            return {
-              ok: true,
-              kind: 'protocol-spin',
-              strategy:
-                event === Vars.Evt_ToServer_RequestSpin
-                  ? 'XT.TriggerEvent(Vars.Evt_ToServer_RequestSpin)'
-                  : 'XT.TriggerEvent(Vars.Evt_DataToCode_Pressed_Spin)'
-            };
-          } catch (error) {
-            return { ok: false, reason: String(error?.message || error) };
-          }
-        });
-        return { ...spin, state };
       }
 
       // Only confirm FS start when an actual active runtime control advertises
