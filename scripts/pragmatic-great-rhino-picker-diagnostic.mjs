@@ -180,7 +180,7 @@ async function inspectRuntime(frame, selection) {
         } catch {}
         if(!source) continue;
         const matched=needles.filter(needle=>source.includes(needle));
-        const namedTarget=/^(?:FSBG_SendPick|FSOption_SendPick|HasFreeSpinOptions|EndOfOptionTransition|OnResponseReceived|OnCloseConfirmation|OnOptionPicked|OnItemPickedFSBGPick)$/i.test(methodName);
+        const namedTarget=/^(?:FSBG_SendPick|FSOption_SendPick|HasFreeSpinOptions|EndOfOptionTransition|OnResponseReceived|OnCloseConfirmation|OnOptionPicked|OnItemPickedFSBGPick|OnFSOptionsEnded|UHTUpdate)$/i.test(methodName);
         if(!matched.length && !namedTarget) continue;
         sourceHits.push({
           owner:ownerLabel,
@@ -531,6 +531,38 @@ async function oneBranch(browser,branch) {
 
       if(traffic.length) break;
     }
+
+    const beforeEndResponses=responses.length;
+    const beforeEndRequests=requests.length;
+    const endGame=await runtime.frame.evaluate(()=>{
+      try {
+        const event=globalThis.Vars?.Evt_DataToCode_EndGameFSBGPick;
+        if(!event || typeof globalThis.XT?.TriggerEvent!=='function') {
+          return {ok:false,reason:'Evt_DataToCode_EndGameFSBGPick unavailable'};
+        }
+        XT.TriggerEvent(event);
+        return {ok:true,strategy:'XT.TriggerEvent(Vars.Evt_DataToCode_EndGameFSBGPick)'};
+      } catch(error) {
+        return {ok:false,reason:String(error?.message||error)};
+      }
+    }).catch(error=>({ok:false,reason:String(error?.message||error)}));
+
+    await page.waitForTimeout(1200);
+    await Promise.allSettled([...tasks]);
+    const endState=await inspectRuntime(runtime.frame,row.selection);
+    row.endGameProbe={
+      action:endGame,
+      requestDelta:requests.slice(beforeEndRequests),
+      responseDelta:responses.slice(beforeEndResponses),
+      state:endState
+    };
+    console.log(
+      'RHINO_ENDGAME ok='+(endGame?.ok===true)+
+      ' canSpin='+(endState?.canSpin??'-')+
+      ' pickerCount='+(endState?.pickerCount??'-')+
+      ' requests='+row.endGameProbe.requestDelta.length+
+      ' responses='+row.endGameProbe.responseDelta.length
+    );
 
     row.status='DONE';
     console.log(
