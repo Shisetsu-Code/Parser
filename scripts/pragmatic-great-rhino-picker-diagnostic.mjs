@@ -290,6 +290,20 @@ async function oneBranch(browser,branch) {
 
     row.before=await inspectRuntime(runtime.frame,row.selection);
 
+    for (const cls of row.before?.globalClasses || []) {
+      if (cls.key !== 'BonusPickConnection') continue;
+      for (const ex of cls.examples || []) {
+        console.log('RHINO_CONN_EXAMPLE name='+String(ex.name||'-')+' fields='+JSON.stringify(ex.fields||{}));
+        for (const m of ex.methodDetails || []) {
+          console.log(
+            'RHINO_CONN_METHOD name='+m.name+
+            ' len='+m.length+
+            ' src='+String(m.source||'').replace(/\s+/g,' ').slice(0,2200)
+          );
+        }
+      }
+    }
+
     const strategies=[
       ['click',async()=>runtime.frame.evaluate(sel=>{
         const roots=globalThis.globalRuntime?.sceneRoots||[];
