@@ -102,14 +102,19 @@ async function greatRhino(browser) {
   const results=[];
   for(let branch=0;branch<4;branch++) {
     const s=await load(browser,'great-rhino-megaways');
-    const row={branch,status:'UNKNOWN',selection:null,press:null,ready:null,state:null,error:null};
+    const row={branch,status:'UNKNOWN',selection:null,press:null,ready:null,state:null,traffic:[],error:null};
     try {
       const selections=await s.provider.listPreBaseSelections?.(s.frame) ?? [];
       row.selection=selections[branch] ?? null;
       if(!row.selection) throw new Error('pre-base selection missing branch='+branch);
 
+      const beforeResponses=s.responses.length;
       row.press=await s.provider.pressPreBaseSelection(s.frame,row.selection);
       await s.page.waitForTimeout(900);
+      await Promise.allSettled([...s.tasks]);
+      row.traffic=s.responses.slice(beforeResponses)
+        .map(exchange)
+        .filter(x=>x.action||x.na||x.bgid||x.fs||x.rs);
       row.ready=await s.provider.waitReady?.(s.frame,7000);
       row.state=await s.provider.protocolState?.(s.frame);
 
@@ -120,7 +125,8 @@ async function greatRhino(browser) {
         ' pick='+(row.press?.strategy||'-')+
         ' finalize='+(row.press?.finalize?.strategy||row.press?.finalize?.reason||'-')+
         ' ready='+(row.ready?.ok===true)+
-        ' canSpin='+(row.state?.canSpin ?? '-')
+        ' canSpin='+(row.state?.canSpin ?? '-')+
+        ' traffic='+row.traffic.map(x=>(x.action||'-')+'/na:'+(x.na??'-')+'/bgid:'+(x.bgid??'-')+'/fs:'+(x.fs??'-')).join(',')
       );
     } catch(error) {
       row.status='ERROR';
