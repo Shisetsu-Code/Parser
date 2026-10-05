@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: "24"
       - run: npm install
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install chromium
       - name: Run Great Rhino picker diagnostic
         run: npm run pragmatic:rhino-diagnostic
       - name: Print compact result
