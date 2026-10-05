@@ -1,0 +1,37 @@
+name: Pragmatic Great Rhino picker diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/pragmatic-great-rhino-picker-diagnostic.mjs"
+      - ".github/workflows/pragmatic-great-rhino-picker-diagnostic.yml"
+      - "src/providers/pragmatic.js"
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Run Great Rhino picker diagnostic
+        run: npm run pragmatic:rhino-diagnostic
+      - name: Print compact result
+        if: always()
+        run: |
+          if [ -f results/pragmatic-great-rhino-picker-diagnostic.json ]; then
+            node -e "const x=require('./results/pragmatic-great-rhino-picker-diagnostic.json'); for(const r of x.results){console.log('BRANCH',r.branch,'status='+r.status,'classes='+(r.before?.globalClasses||[]).map(c=>c.key+':'+c.count).join(','),'clickDiff='+Object.keys(r.diffs?.click||{}).join(','),'pressDiff='+Object.keys(r.diffs?.press||{}).join(','),'error='+(r.error?String(r.error).split('\n')[0]:'-'))}"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pragmatic-great-rhino-picker-diagnostic
+          path: results/pragmatic-great-rhino-picker-diagnostic.json
+          if-no-files-found: warn
+          retention-days: 7
