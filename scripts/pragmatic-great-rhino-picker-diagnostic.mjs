@@ -31,6 +31,30 @@ async function inspectRuntime(frame, selection) {
   return frame.evaluate(({selection})=>{
     const roots=globalThis.globalRuntime?.sceneRoots||[];
 
+    const activeButtons=[];
+    if(globalThis.XTButton) {
+      for(let ri=0;ri<roots.length;ri++) {
+        let buttons=[];
+        try { buttons=roots[ri].GetComponentsInChildren(XTButton,true)||[]; } catch {}
+        for(const button of buttons) {
+          try {
+            if(button.gameObject?.activeInHierarchy!==true) continue;
+            activeButtons.push({
+              root:ri,
+              name:String(button.gameObject?.name||''),
+              event:String(button.eventToCode?.name||''),
+              action:button.action??null,
+              useParam:button.useParam??null,
+              paramValue:button.paramValue??null,
+              paramName:button.param?.name??null,
+              canClick:typeof button.OnClick==='function',
+              canPress:typeof button.OnPress==='function'
+            });
+          } catch {}
+        }
+      }
+    }
+
     const props=(object,maxDepth=4)=>{
       const names=[];
       const seen=new Set();
@@ -130,7 +154,7 @@ async function inspectRuntime(frame, selection) {
 
     const globalClasses=[];
     for(const key of Object.keys(globalThis)) {
-      if(!/fsbg|pick|free.*spin.*option|bonus.*option/i.test(key)) continue;
+      if(!/fsbg|pick|confirm|free.*spin.*option|bonus.*option/i.test(key)) continue;
       const Ctor=globalThis[key];
       if(typeof Ctor!=='function') continue;
       let count=0;
@@ -177,6 +201,7 @@ async function inspectRuntime(frame, selection) {
     }
 
     return {
+      activeButtons,
       target:target?{
         constructor:target?.constructor?.name??null,
         fields:primitiveFields(target),
@@ -193,6 +218,27 @@ async function inspectRuntime(frame, selection) {
       globalClasses
     };
   },{selection});
+}
+
+function buttonKey(button) {
+  return [
+    button?.root,
+    button?.name,
+    button?.event,
+    button?.action,
+    button?.useParam,
+    button?.paramValue,
+    button?.paramName
+  ].join('|');
+}
+
+function diffButtons(before,after) {
+  const a=new Map((before||[]).map(x=>[buttonKey(x),x]));
+  const b=new Map((after||[]).map(x=>[buttonKey(x),x]));
+  return {
+    added:[...b.entries()].filter(([k])=>!a.has(k)).map(([,v])=>v),
+    removed:[...a.entries()].filter(([k])=>!b.has(k)).map(([,v])=>v)
+  };
 }
 
 function diffVars(before,after) {
@@ -278,6 +324,7 @@ async function oneBranch(browser,branch) {
       const state=await inspectRuntime(runtime.frame,row.selection);
       row['after'+name[0].toUpperCase()+name.slice(1)]={action,state};
       row.diffs[name]=diffVars(prior.varSnapshot,state.varSnapshot);
+      row.diffs[name+'Buttons']=diffButtons(prior.activeButtons,state.activeButtons);
       prior=state;
     }
 
