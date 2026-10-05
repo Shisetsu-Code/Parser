@@ -336,6 +336,80 @@ function diffVars(before,after) {
   return out;
 }
 
+async function introProbe(browser) {
+  const context=await browser.newContext({viewport:{width:1440,height:900}});
+  const page=await context.newPage();
+  const responses=[];
+  const tasks=new Set();
+
+  const handler=response=>{
+    if(!/gameService/i.test(response.url())) return;
+    const task=(async()=>{
+      const s=await summarizeResponse(response);
+      responses.push(s);
+      const req=form(s.requestPostData||'');
+      if(req.action==='doInit') {
+        const pur=parsePurInit(s.body||'');
+        await response.request().frame().evaluate(value=>{
+          globalThis.__parserPragmaticPurInit=value;
+        },pur).catch(()=>{});
+      }
+    })().catch(()=>{}).finally(()=>tasks.delete(task));
+    tasks.add(task);
+  };
+  page.on('response',handler);
+
+  const row={status:'UNKNOWN',before:null,press:null,after:null,ready:null,error:null};
+  try {
+    await page.goto(URL,{waitUntil:'domcontentloaded',timeout:60000});
+    await page.waitForTimeout(2200);
+    await bootstrapSupportedPage(page);
+    let runtime=await findRuntime(page,30000);
+    if(!runtime||runtime.provider.id!=='pragmatic') throw new Error('runtime not found');
+
+    const selections=await runtime.provider.listPreBaseSelections?.(runtime.frame) ?? [];
+    row.before={
+      selections:selections.length,
+      state:await runtime.provider.protocolState?.(runtime.frame).catch(()=>null),
+      snapshot:await runtime.provider.stateSnapshot?.(runtime.frame).catch(()=>null)
+    };
+
+    row.press=await runtime.provider.press(runtime.frame,'intro_close_pressed');
+    await page.waitForTimeout(1200);
+    await Promise.allSettled([...tasks]);
+
+    runtime=await findRuntime(page,5000).catch(()=>null);
+    if(runtime?.provider?.id==='pragmatic') {
+      const selectionsAfter=await runtime.provider.listPreBaseSelections?.(runtime.frame) ?? [];
+      row.ready=await runtime.provider.waitReady?.(runtime.frame,5000).catch(()=>null);
+      row.after={
+        selections:selectionsAfter.length,
+        state:await runtime.provider.protocolState?.(runtime.frame).catch(()=>null),
+        snapshot:await runtime.provider.stateSnapshot?.(runtime.frame).catch(()=>null)
+      };
+    }
+
+    row.status=row.ready?.ok===true ? 'PASS' : 'FAIL';
+    console.log(
+      'RHINO_INTRO status='+row.status+
+      ' beforeSelections='+(row.before?.selections??'-')+
+      ' press='+(row.press?.strategy||row.press?.reason||'-')+
+      ' afterSelections='+(row.after?.selections??'-')+
+      ' canSpin='+(row.after?.snapshot?.canSpin??'-')+
+      ' ready='+(row.ready?.ok===true)
+    );
+  } catch(error) {
+    row.status='ERROR';
+    row.error=String(error?.stack||error?.message||error);
+    console.log('RHINO_INTRO ERROR '+String(error?.message||error));
+  } finally {
+    await Promise.allSettled([...tasks]);
+    page.off('response',handler);
+    await context.close();
+  }
+  return row;
+}
+
 async function oneBranch(browser,branch) {
   const context=await browser.newContext({viewport:{width:1440,height:900}});
   const page=await context.newPage();
@@ -631,11 +705,13 @@ async function oneBranch(browser,branch) {
 }
 
 const browser=await chromium.launch({headless:true});
+const intro=await introProbe(browser);
 const results=[];
 for(const branch of [0]) results.push(await oneBranch(browser,branch));
 await browser.close();
 
 await writeJson('results/pragmatic-great-rhino-picker-diagnostic.json',{
   generatedAt:new Date().toISOString(),
+  intro,
   results
 });
