@@ -108,6 +108,22 @@ export const pragmatic = {
             window.Vars?.DisableIntroScreen ? XT.GetBool(Vars.DisableIntroScreen) : null
           ),
           hasIntroCloseEvent: Boolean(window.Vars?.Evt_DataToCode_IntroClosePressed),
+          hasFreeSpinOptions: (() => {
+            try {
+              const ref = window.Vars?.FreeSpinOptions;
+              return Boolean(ref && XT.GetObject(ref));
+            } catch {
+              return false;
+            }
+          })(),
+          hasReceivedFreeSpinsResponse: (() => {
+            try {
+              const ref = window.Vars?.ReceivedFreeSpinsResponse;
+              return Boolean(ref && XT.GetObject(ref));
+            } catch {
+              return false;
+            }
+          })(),
           safeControls,
           pickerControls,
           preBaseSelection: pickerControls.length > 0
@@ -216,7 +232,8 @@ export const pragmatic = {
         const introOwnsCurrentPicker =
           last?.preBaseSelection === true &&
           last?.shouldDisplayIntro === true &&
-          last?.purInitReady !== true;
+          last?.hasFreeSpinOptions !== true &&
+          last?.hasReceivedFreeSpinsResponse !== true;
 
         const canUseIntroEvent =
           last?.hasIntroCloseEvent === true &&
