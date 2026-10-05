@@ -365,6 +365,7 @@ export const pragmatic = {
     const inspect = async () => frame.evaluate(() => {
       const roots = globalThis.globalRuntime?.sceneRoots || [];
       const pickers = [];
+
       if (globalThis.XTButton) {
         for (let ri = 0; ri < roots.length; ri++) {
           let buttons = [];
@@ -381,6 +382,7 @@ export const pragmatic = {
           }
         }
       }
+
       return {
         pickerCount: pickers.length,
         pickers,
@@ -397,12 +399,18 @@ export const pragmatic = {
           }
         })()
       };
-    }).catch(() => ({ pickerCount: null, pickers: [], canSpin: null }));
+    }).catch(() => ({
+      pickerCount:null,
+      pickers:[],
+      canSpin:null,
+      pickedItemIndexLocal:null
+    }));
 
-    const invoke = async strategy => frame.evaluate(({ selection, strategy }) => {
+    const choose = await frame.evaluate(({ selection }) => {
       try {
         const roots = globalThis.globalRuntime?.sceneRoots || [];
         if (!globalThis.XTButton) return { ok:false, reason:'XTButton unavailable' };
+
         const root = roots[Number(selection?.root)];
         if (!root) return { ok:false, reason:'selection root unavailable' };
 
@@ -427,135 +435,149 @@ export const pragmatic = {
 
         if (!target) return { ok:false, reason:'pre-base selection disappeared' };
 
-        if (strategy === 'press') {
-          if (typeof target.OnPress !== 'function') return { ok:false, reason:'OnPress unavailable' };
-          target.OnPress(true);
-          target.OnPress(false);
-          return { ok:true, strategy:'XTButton.OnPress(true/false)' };
+        // Diagnostics prove OnClick -> XTButton.DoIt() writes
+        // PickedItemIndexLocal_FSBGPick using paramValue 0..N.
+        if (typeof target.OnClick !== 'function') {
+          return { ok:false, reason:'pre-base picker OnClick unavailable' };
         }
 
-        if (strategy === 'click') {
-          if (typeof target.OnClick !== 'function') return { ok:false, reason:'OnClick unavailable' };
-          target.OnClick();
-          return { ok:true, strategy:'XTButton.OnClick()' };
+        target.OnClick();
+
+        return {
+          ok:true,
+          strategy:'XTButton.OnClick()',
+          optionIndex:Number(selection?.optionIndex),
+          paramValue:Number(target?.paramValue)
+        };
+      } catch (error) {
+        return { ok:false, reason:String(error?.message || error) };
+      }
+    }, { selection }).catch(error => ({
+      ok:false,
+      reason:String(error?.message || error)
+    }));
+
+    if (!choose?.ok) {
+      return {
+        ok:false,
+        selection,
+        reason:choose?.reason || 'pre-base picker click failed',
+        choose
+      };
+    }
+
+    await frame.page().waitForTimeout(180);
+    const afterChoose = await inspect();
+
+    const optionIndex = Number.isFinite(Number(afterChoose?.pickedItemIndexLocal))
+      && Number(afterChoose.pickedItemIndexLocal) >= 0
+        ? Number(afterChoose.pickedItemIndexLocal)
+        : Number(selection?.optionIndex);
+
+    if (!Number.isFinite(optionIndex) || optionIndex < 0) {
+      return {
+        ok:false,
+        selection,
+        reason:'pre-base picker did not expose a valid selected index',
+        choose,
+        afterChoose
+      };
+    }
+
+    const send = await frame.evaluate(({ optionIndex }) => {
+      try {
+        const roots = globalThis.globalRuntime?.sceneRoots || [];
+        const Ctor = globalThis.BonusPickConnection;
+        if (typeof Ctor !== 'function') {
+          return { ok:false, reason:'BonusPickConnection unavailable' };
         }
 
-        if (strategy === 'event') {
-          const event = globalThis.Vars?.Evt_DataToCode_ItemPickedFSBGPick;
+        const connections = [];
+        for (const root of roots) {
+          try {
+            connections.push(...(root.GetComponentsInChildren(Ctor, true) || []));
+          } catch {}
+        }
+
+        const connection = connections.find(item =>
+          item &&
+          item.gameObject?.activeInHierarchy !== false &&
+          typeof item.SendItemPick === 'function'
+        ) || connections.find(item => typeof item?.SendItemPick === 'function');
+
+        if (!connection) {
+          return { ok:false, reason:'BonusPickConnection.SendItemPick unavailable' };
+        }
+
+        connection.SendItemPick(Number(optionIndex));
+
+        return {
+          ok:true,
+          strategy:'BonusPickConnection.SendItemPick(optionIndex)',
+          optionIndex:Number(optionIndex),
+          connectionName:connection.gameObject?.name ?? null
+        };
+      } catch (error) {
+        return { ok:false, reason:String(error?.message || error) };
+      }
+    }, { optionIndex }).catch(error => ({
+      ok:false,
+      reason:String(error?.message || error)
+    }));
+
+    if (!send?.ok) {
+      return {
+        ok:false,
+        selection,
+        reason:send?.reason || 'BonusPickConnection send failed',
+        choose,
+        send,
+        afterChoose
+      };
+    }
+
+    // Give the server response / HandlerPlayerSelection time to update the FSBG state.
+    await frame.page().waitForTimeout(700);
+    let afterSend = await inspect();
+
+    let finalize = null;
+    if (afterSend?.pickerCount > 0 && afterSend?.canSpin !== true) {
+      finalize = await frame.evaluate(() => {
+        try {
+          const event = globalThis.Vars?.Evt_DataToCode_FSBG_CloseConfirmation;
           if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
-            return { ok:false, reason:'Evt_DataToCode_ItemPickedFSBGPick unavailable' };
-          }
-
-          const optionIndex = Number(selection?.optionIndex);
-          const possibleIndexVars = [
-            'BonusPickItemIndex',
-            'BonusPickItemIndexLocal',
-            'FSBGPickedOption',
-            'FSBGPickIndex',
-            'SelectedFSBGOption'
-          ];
-
-          const assigned = [];
-          for (const key of possibleIndexVars) {
-            const ref = globalThis.Vars?.[key];
-            if (!ref || !Number.isFinite(optionIndex)) continue;
-            try {
-              if (typeof XT.SetInt === 'function') {
-                XT.SetInt(ref, optionIndex);
-                assigned.push(key + ':int');
-                continue;
-              }
-            } catch {}
-            try {
-              if (typeof XT.SetObject === 'function') {
-                XT.SetObject(ref, optionIndex);
-                assigned.push(key + ':object');
-              }
-            } catch {}
+            return {
+              ok:false,
+              skipped:true,
+              reason:'FSBG close confirmation unavailable'
+            };
           }
 
           XT.TriggerEvent(event);
           return {
             ok:true,
-            strategy:'XT.TriggerEvent(Vars.Evt_DataToCode_ItemPickedFSBGPick)',
-            optionIndex:Number.isFinite(optionIndex) ? optionIndex : null,
-            assigned
+            strategy:'XT.TriggerEvent(Vars.Evt_DataToCode_FSBG_CloseConfirmation)'
           };
+        } catch (error) {
+          return { ok:false, reason:String(error?.message || error) };
         }
+      }).catch(error => ({
+        ok:false,
+        reason:String(error?.message || error)
+      }));
 
-        return { ok:false, reason:'unknown strategy' };
-      } catch (error) {
-        return { ok:false, reason:String(error?.message || error) };
-      }
-    }, { selection, strategy }).catch(error => ({
-      ok:false,
-      reason:String(error?.message || error)
-    }));
-
-    const before = await inspect();
-    const attempts = [];
-
-    for (const strategy of ['click', 'press', 'event']) {
-      const action = await invoke(strategy);
       await frame.page().waitForTimeout(450);
-      const after = await inspect();
-
-      attempts.push({ strategy, action, after });
-
-      const pickedIndexChanged =
-        Number.isFinite(Number(after?.pickedItemIndexLocal)) &&
-        Number(after.pickedItemIndexLocal) >= 0 &&
-        Number(after.pickedItemIndexLocal) !== Number(before?.pickedItemIndexLocal);
-
-      const changed =
-        pickedIndexChanged ||
-        after?.pickerCount === 0 ||
-        after?.canSpin === true ||
-        (
-          Number.isFinite(Number(before?.pickerCount)) &&
-          Number.isFinite(Number(after?.pickerCount)) &&
-          Number(after.pickerCount) < Number(before.pickerCount)
-        );
-
-      if (action?.ok && changed) {
-        // Some FSBG pickers expose a separate close-confirmation transition.
-        const finalize = await frame.evaluate(() => {
-          try {
-            const event = globalThis.Vars?.Evt_DataToCode_FSBG_CloseConfirmation;
-            if (!event || typeof globalThis.XT?.TriggerEvent !== 'function') {
-              return { ok:false, skipped:true, reason:'FSBG close confirmation unavailable' };
-            }
-            XT.TriggerEvent(event);
-            return {
-              ok:true,
-              strategy:'XT.TriggerEvent(Vars.Evt_DataToCode_FSBG_CloseConfirmation)'
-            };
-          } catch (error) {
-            return { ok:false, reason:String(error?.message || error) };
-          }
-        }).catch(error => ({ ok:false, reason:String(error?.message || error) }));
-
-        await frame.page().waitForTimeout(450);
-
-        return {
-          ok:true,
-          selection,
-          strategy:action.strategy,
-          attempts,
-          finalize,
-          before,
-          after:await inspect()
-        };
-      }
+      afterSend = await inspect();
     }
 
     return {
-      ok:false,
+      ok:true,
       selection,
-      reason:'pre-base selection did not change picker state',
-      attempts,
-      before,
-      after:await inspect()
+      strategy:'XTButton.OnClick() + BonusPickConnection.SendItemPick(optionIndex)',
+      choose,
+      send,
+      finalize,
+      after:afterSend
     };
   },
 
