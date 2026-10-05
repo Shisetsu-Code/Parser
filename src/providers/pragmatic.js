@@ -278,8 +278,8 @@ export const pragmatic = {
     };
   },
 
-  async listPreBaseSelections(frame) {
-    return frame.evaluate(() => {
+  async listPreBaseSelections(frame, timeoutMs = 3000) {
+    const read = async () => frame.evaluate(() => {
       const roots = globalThis.globalRuntime?.sceneRoots || [];
       if (!globalThis.XTButton) return [];
 
@@ -325,6 +325,40 @@ export const pragmatic = {
 
       return out;
     }).catch(() => []);
+
+    const deadline = Date.now() + Math.max(500, Number(timeoutMs) || 3000);
+    let best = [];
+    let lastKey = null;
+    let stable = 0;
+
+    while (Date.now() < deadline) {
+      const current = await read();
+      if (current.length > best.length) best = current;
+
+      const key = current
+        .map(item => [
+          item.root,
+          item.name,
+          item.event,
+          item.occurrence,
+          item.optionIndex
+        ].join('|'))
+        .sort()
+        .join('\n');
+
+      if (current.length > 0 && key === lastKey) stable++;
+      else stable = 0;
+
+      lastKey = key;
+
+      // Require several identical observations so late-created options are not
+      // mistaken for the final picker set.
+      if (current.length > 0 && stable >= 3) return current;
+
+      await frame.page().waitForTimeout(180);
+    }
+
+    return best;
   },
 
   async pressPreBaseSelection(frame, selection) {
